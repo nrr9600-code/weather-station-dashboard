@@ -242,6 +242,56 @@ function systemLoadWatts(row) {
   return null;
 }
 
+function uptimeText(minutes) {
+  if (!isValid(minutes)) return "--";
+  const m = Math.max(0, Math.round(Number(minutes)));
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m % 1440) / 60);
+  const mm = m % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${mm}m`;
+  return `${mm}m`;
+}
+
+function wifiQuality(rssi) {
+  if (!isValid(rssi)) return { label:"Unknown", bars:0, color:"#64748b" };
+  const x = Number(rssi);
+  if (x >= -60) return { label:"Excellent", bars:5, color:"#22c55e" };
+  if (x >= -70) return { label:"Good", bars:4, color:"#22c55e" };
+  if (x >= -80) return { label:"Fair", bars:3, color:"#eab308" };
+  if (x >= -90) return { label:"Weak", bars:2, color:"#f97316" };
+  return { label:"Poor", bars:1, color:"#ef4444" };
+}
+
+function rfQuality(row) {
+  if (!row) return { label:"No RF", bars:0, color:"#64748b", text:"--" };
+  if (isValid(row.lora_rssi)) {
+    const x = Number(row.lora_rssi);
+    if (x >= -70) return { label:"Excellent", bars:5, color:"#22c55e", text:`${Math.round(x)} dBm` };
+    if (x >= -90) return { label:"Good", bars:4, color:"#22c55e", text:`${Math.round(x)} dBm` };
+    if (x >= -105) return { label:"Fair", bars:3, color:"#eab308", text:`${Math.round(x)} dBm` };
+    if (x >= -115) return { label:"Weak", bars:2, color:"#f97316", text:`${Math.round(x)} dBm` };
+    return { label:"Poor", bars:1, color:"#ef4444", text:`${Math.round(x)} dBm` };
+  }
+  if ((row.route || "") === "direct") return { label:"Direct WiFi", bars:0, color:"#3b82f6", text:"Outdoor uploaded directly" };
+  return { label:"Waiting", bars:0, color:"#64748b", text:"No relay RF yet" };
+}
+
+function routeFriendly(route) {
+  if (route === "direct") return "Direct upload";
+  if (route === "relay") return "Indoor relay";
+  if (route === "queued") return "Queued";
+  return route || "Unknown";
+}
+
+function batteryStateLabel(pct) {
+  if (pct == null) return { label:"Unknown", color:"#64748b" };
+  if (pct >= 60) return { label:"Good", color:"#22c55e" };
+  if (pct >= 30) return { label:"Normal", color:"#eab308" };
+  if (pct >= 15) return { label:"Low", color:"#f97316" };
+  return { label:"Critical", color:"#ef4444" };
+}
+
 async function fetchLatestAndHistory() {
   const [latestRes, historyRes] = await Promise.all([
     fetch("/api/latest", { cache: "no-store" }).then(r => r.json()),
@@ -294,6 +344,100 @@ function MetricCard({ title, value, unit, sub, color, sparkData, sparkKey, dot, 
       {sub && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>{sub}</div>}
       {sparkData && sparkKey && <Spark data={sparkData} dataKey={sparkKey} color={color||"#3b82f6"} h={30} />}
       <div style={{ position:"absolute", bottom:8, right:12, fontSize:10, color:"#475569" }}>tap for details →</div>
+    </div>
+  );
+}
+
+function SignalBars({ bars, color }) {
+  return (
+    <span style={{ display:"inline-flex", gap:2, alignItems:"flex-end", height:14 }}>
+      {[1,2,3,4,5].map(i => (
+        <span key={i} style={{ width:4, height:4 + i*2, borderRadius:2, background:i <= bars ? color : "#334155", opacity:i <= bars ? 1 : .55 }} />
+      ))}
+    </span>
+  );
+}
+
+function StationStatusStrip({ row, battPct, loadW, onOpen }) {
+  const wifi = wifiQuality(row?.rssi);
+  const rf = rfQuality(row);
+  const batt = batteryStateLabel(battPct);
+  return (
+    <div className="wide" style={{ gridColumn:"span 3", background:"linear-gradient(145deg,#08111f,#0f172a)", border:"1px solid #1e3a5f", borderRadius:14, padding:"12px 14px", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10 }}>
+      <button onClick={() => onOpen("battery")} style={statusButtonStyle}>
+        <div style={statusLabelStyle}>🔋 Battery</div>
+        <div style={{ ...statusValueStyle, color:batt.color }}>{battPct == null ? "--" : `${battPct}%`}</div>
+        <div style={statusSubStyle}>{batt.label} · {display(row?.battery_voltage,2)}V</div>
+      </button>
+      <button onClick={() => onOpen("power")} style={statusButtonStyle}>
+        <div style={statusLabelStyle}>⚡ Power use</div>
+        <div style={{ ...statusValueStyle, color:"#f59e0b" }}>{loadW == null ? "--" : `${loadW.toFixed(2)}W`}</div>
+        <div style={statusSubStyle}>{display(row?.battery_current,0)}mA load</div>
+      </button>
+      <button onClick={() => onOpen("signal")} style={statusButtonStyle}>
+        <div style={statusLabelStyle}>📶 Signal</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
+          <SignalBars bars={wifi.bars} color={wifi.color} />
+          <span style={{ ...statusValueStyle, color:wifi.color, fontSize:16 }}>{wifi.label}</span>
+        </div>
+        <div style={statusSubStyle}>WiFi {displayInt(row?.rssi)} dBm</div>
+      </button>
+      <button onClick={() => onOpen("signal")} style={statusButtonStyle}>
+        <div style={statusLabelStyle}>🛰️ Data route</div>
+        <div style={{ ...statusValueStyle, color: row?.route === "relay" ? "#3b82f6" : "#22c55e", fontSize:16 }}>{routeFriendly(row?.route)}</div>
+        <div style={statusSubStyle}>RF: {rf.label}</div>
+      </button>
+    </div>
+  );
+}
+
+const statusButtonStyle = {
+  background:"#020617",
+  border:"1px solid #1e293b",
+  borderRadius:12,
+  padding:"10px 8px",
+  textAlign:"center",
+  cursor:"pointer",
+  color:"inherit",
+  minHeight:84,
+};
+const statusLabelStyle = { fontSize:10, color:"#94a3b8", letterSpacing:.6, textTransform:"uppercase", marginBottom:5 };
+const statusValueStyle = { fontSize:18, lineHeight:1.1, fontWeight:900 };
+const statusSubStyle = { fontSize:10, color:"#64748b", marginTop:5, lineHeight:1.25 };
+
+function StationHealthPanel({ row, battPct, loadW, onOpen }) {
+  const wifi = wifiQuality(row?.rssi);
+  const rf = rfQuality(row);
+  const q = isValid(row?.queue_count) ? Number(row.queue_count) : 0;
+  const items = [
+    { label:"Battery", value:battPct == null ? "--" : `${battPct}%`, sub:`${display(row?.battery_voltage,3)}V · 10Ah solar battery`, color:batteryStateLabel(battPct).color, page:"battery" },
+    { label:"Power use", value:loadW == null ? "--" : `${loadW.toFixed(2)}W`, sub:`Board + sensors · ${display(row?.battery_current,1)}mA`, color:"#f59e0b", page:"power" },
+    { label:"WiFi", value:wifi.label, sub:`${displayInt(row?.rssi)} dBm`, color:wifi.color, page:"signal", bars:wifi.bars },
+    { label:"Outdoor RF", value:rf.label, sub:rf.text, color:rf.color, page:"signal", bars:rf.bars },
+    { label:"Route", value:routeFriendly(row?.route), sub:row?.route === "relay" ? "Indoor unit forwarded data" : "Outdoor uploaded directly", color:row?.route === "relay" ? "#3b82f6" : "#22c55e", page:"signal" },
+    { label:"Pending data", value:String(q), sub:q === 0 ? "No backlog" : "Waiting to upload", color:q === 0 ? "#22c55e" : "#eab308", page:"signal" },
+  ];
+  return (
+    <div className="wide" style={{ gridColumn:"span 3", background:"#0f172a", border:"1px solid #334155", borderRadius:14, padding:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginBottom:12 }}>
+        <div>
+          <div style={{ fontSize:12, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase", fontWeight:800 }}>Station health</div>
+          <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>Power, signal, route, and data delivery status.</div>
+        </div>
+        <a href="/debug-weather-nr" style={{ color:"#64748b", fontSize:11, textDecoration:"none", border:"1px solid #334155", borderRadius:999, padding:"5px 10px" }}>Debug →</a>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8 }} className="healthGrid">
+        {items.map(item => (
+          <button key={item.label} onClick={() => item.page && onOpen(item.page)} style={{ background:"#020617", border:"1px solid #1e293b", borderRadius:10, padding:"9px 8px", textAlign:"left", cursor:item.page ? "pointer" : "default", color:"inherit", minHeight:80 }}>
+            <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.6 }}>{item.label}</div>
+            <div style={{ fontSize:15, fontWeight:900, color:item.color, marginTop:4, display:"flex", gap:6, alignItems:"center" }}>
+              {item.bars != null && <SignalBars bars={item.bars} color={item.color} />}
+              <span>{item.value}</span>
+            </div>
+            <div style={{ fontSize:10, color:"#64748b", marginTop:4, lineHeight:1.2 }}>{item.sub}</div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -684,7 +828,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(180deg,#020617,#0f172a,#020617)", color:"#f1f5f9", fontFamily:"system-ui", padding:"20px 16px" }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}.detailGrid{grid-template-columns:1fr!important}} @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}.detailGrid{grid-template-columns:1fr!important}.healthGrid{grid-template-columns:repeat(2,1fr)!important}} @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}.healthGrid{display:grid!important;grid-template-columns:1fr!important}.healthGrid>button{margin-bottom:0!important}}`}</style>
 
       <div className="headerWrap" style={{ maxWidth:900, margin:"0 auto 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
         <div>
@@ -719,6 +863,8 @@ export default function App() {
             </div>
           </div>
 
+          <StationStatusStrip row={current} battPct={battPct} loadW={loadW} onOpen={openPage} />
+
           <MetricCard title="Temperature" value={display(current.temperature,1)} unit="°C" color="#f59e0b"
             sub={`Feels ${fl == null ? "--" : fl.toFixed(1)}°C`} sparkData={history} sparkKey="temperature"
             dot={<Dot value={current.temperature} lastUpdate={current.created_at} />} onClick={() => openPage("temperature")} />
@@ -751,30 +897,11 @@ export default function App() {
             sparkData={history} sparkKey="uv_index"
             dot={<Dot value={current.uv_index} lastUpdate={current.created_at} />} onClick={() => openPage("uv")} />
 
-          <MetricCard title="Battery" value={display(current.battery_voltage,2)} unit="V"
-            color={n(current.battery_voltage,0) > 3.1 ? "#22c55e" : "#ef4444"}
-            sub={`${battPct == null ? "--" : battPct}% | ${display(current.battery_current,0)}mA load`}
-            sparkData={history} sparkKey="battery_voltage"
-            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => openPage("battery")} />
-
-          <MetricCard title="Power Use" value={loadW == null ? "--" : loadW.toFixed(2)} unit="W"
-            color="#f59e0b" sub="board + sensors from 10Ah battery"
-            sparkData={history} sparkKey="system_load_watts"
-            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => openPage("power")} />
-
-          <MetricCard title="Signal" value={displayInt(current.rssi)} unit="dBm"
-            color={n(current.rssi,-100) > -70 ? "#22c55e" : n(current.rssi,-100) > -85 ? "#eab308" : "#ef4444"}
-            sub={isValid(current.lora_rssi) ? `LoRa: ${current.lora_rssi}dBm` : (current.route === "direct" ? "Direct WiFi" : "Relay status")}
-            sparkData={history} sparkKey="rssi"
-            dot={<Dot value={current.rssi || 1} lastUpdate={current.created_at} />} onClick={() => openPage("signal")} />
-
-          <div style={{ gridColumn:"span 3" }} className="wide">
-            <RouteDiagram route={current.route || "direct"} />
-          </div>
+          <StationHealthPanel row={current} battPct={battPct} loadW={loadW} onOpen={openPage} />
 
           <div className="wide" style={{ gridColumn:"span 3", textAlign:"center", padding:8, fontSize:11, color:"#475569" }}>
             <span className="statsLine">{current.created_at && `Last: ${fmtDateTime(current.created_at)} Oman time`}</span>
-            {current.uptime_minutes != null && <span className="statsLine">{` | Up: ${Math.floor(current.uptime_minutes/60)}h${current.uptime_minutes%60}m`}</span>}
+            {current.uptime_minutes != null && <span className="statsLine">{` | Up: ${uptimeText(current.uptime_minutes)}`}</span>}
             {current.packet_number && <span className="statsLine">{` | Pkt #${current.packet_number}`}</span>}
             {current.firmware_version && <span className="statsLine">{` | FW ${current.firmware_version}`}</span>}
             <span className="statsLine">{" | Solar powered ☀"}</span>

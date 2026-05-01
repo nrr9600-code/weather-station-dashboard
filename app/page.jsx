@@ -262,16 +262,24 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState("");
 
+  // Important: the parent dashboard re-renders every second to update the live age text.
+  // Arrays/objects created during those renders get new identities, so depending directly
+  // on chartConfig.fields causes this page to refetch and remount the chart every second.
+  // Stable keys make the chart fetch only when the selected metric or range changes.
+  const fieldsKey = (chartConfig.fields || []).join("|");
+  const barsKey = (chartConfig.bars || []).join("|");
+
   useEffect(() => {
     let alive = true;
+    const fields = [...(chartConfig.fields || [])];
     setLoading(true);
     setError("");
     fetchHistoryRange(range)
       .then(rows => {
         if (!alive) return;
-        const processed = aggregateRows(rows, range, chartConfig.fields);
-        const primary = chartConfig.fields[0];
-        const vals = rows.map(r => r[primary]).filter(isValid).map(Number);
+        const processed = aggregateRows(rows, range, fields);
+        const primary = fields[0];
+        const vals = primary ? rows.map(r => r[primary]).filter(isValid).map(Number) : [];
         if (vals.length) {
           const mn = Math.min(...vals), mx = Math.max(...vals);
           const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
@@ -290,7 +298,7 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig }) {
         setLoading(false);
       });
     return () => { alive = false; };
-  }, [range, chartConfig.fields]);
+  }, [range, fieldsKey, barsKey]);
 
   return (
     <div style={{ maxWidth:900, margin:"0 auto" }}>

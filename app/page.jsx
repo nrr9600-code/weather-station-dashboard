@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Area,
   Bar,
@@ -17,6 +17,7 @@ import {
 
 const OMAN_TZ = "Asia/Muscat";
 const WIND_DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const DETAIL_PAGE_KEYS = new Set(["temperature","humidity","pressure","wind","air-quality","uv","battery","power","signal"]);
 
 function isValid(v) {
   return v !== null && v !== undefined && Number.isFinite(Number(v)) && Number(v) > -900 && Number(v) !== -1;
@@ -47,6 +48,29 @@ function fmtTime(d) {
 function fmtDate(d) {
   if (!d) return "--";
   return new Date(d).toLocaleDateString("en-OM", { timeZone: OMAN_TZ, month: "short", day: "numeric" });
+}
+
+function fmtDayDate(d) {
+  if (!d) return "--";
+  return new Date(d).toLocaleDateString("en-OM", { timeZone: OMAN_TZ, weekday: "short", day: "numeric" });
+}
+
+function fmtChartTick(d, range) {
+  if (range === "24h") return fmtTime(d);
+  if (range === "7d") return fmtDayDate(d);
+  return fmtDate(d);
+}
+
+function chartRangeLabel(range) {
+  if (range === "24h") return "5-minute readings across the last 24 hours";
+  if (range === "7d") return "Daily averages across the last 7 days";
+  return "Daily averages across the last 30 days";
+}
+
+function localDayKey(d) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: OMAN_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(d));
+  const get = type => parts.find(p => p.type === type)?.value || "00";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 function fmtDateTime(d) {
@@ -115,6 +139,65 @@ function uvLabel(v) {
   if (!isValid(v)) return "No reading";
   const x = Number(v);
   return x < 3 ? "Low" : x < 6 ? "Moderate" : x < 8 ? "High" : x < 11 ? "Very high" : "Extreme";
+}
+
+function uvAdvice(v) {
+  if (!isValid(v)) return "UV sensor is not reporting yet.";
+  const x = Number(v);
+  if (x < 3) return "UV is low. Normal sun protection is enough.";
+  if (x < 6) return "Use shade, hats, and sunscreen for longer outdoor time.";
+  if (x < 8) return "High UV. Prefer shade and avoid long midday exposure.";
+  if (x < 11) return "Very high UV. Keep activities short and use strong sun protection.";
+  return "Extreme UV. Avoid direct sun where possible.";
+}
+
+function windAdvice(v) {
+  if (!isValid(v)) return "Wind sensor is not reporting yet.";
+  const x = Number(v);
+  if (x < 20) return "Wind is light and comfortable.";
+  if (x < 39) return "Breezy. Secure papers, light objects, and shade covers.";
+  if (x < 50) return "Windy. Avoid loose equipment and check outdoor setups.";
+  return "Strong wind. Outdoor activities and temporary structures need caution.";
+}
+
+function activityGuidance(row) {
+  if (!row) return { icon:"⏳", title:"Waiting for readings", message:"The station has not sent data yet.", color:"#64748b", points:[] };
+  let level = 0;
+  const points = [];
+  const pm = Number(row.pm2_5);
+  if (isValid(row.pm2_5)) {
+    if (pm > 55) { level = Math.max(level, 3); points.push("Air quality is poor. Move outdoor activity indoors."); }
+    else if (pm > 35) { level = Math.max(level, 2); points.push("Air quality is unhealthy for sensitive students."); }
+    else if (pm > 12) { level = Math.max(level, 1); points.push("Air quality is moderate. Sensitive students should take it easy."); }
+    else points.push("Air quality is good.");
+  }
+  const uv = Number(row.uv_index);
+  if (isValid(row.uv_index)) {
+    if (uv >= 11) { level = Math.max(level, 3); points.push("Extreme UV. Avoid direct sun where possible."); }
+    else if (uv >= 8) { level = Math.max(level, 2); points.push("Very high UV. Use shade, hats, and sunscreen."); }
+    else if (uv >= 6) { level = Math.max(level, 2); points.push("High UV. Keep outdoor time shorter at midday."); }
+    else if (uv >= 3) { level = Math.max(level, 1); points.push("Moderate UV. Sun protection is recommended."); }
+    else points.push("UV is low.");
+  }
+  const wind = Number(row.wind_gust ?? row.wind_speed_avg ?? row.wind_speed);
+  if (isValid(wind)) {
+    if (wind >= 50) { level = Math.max(level, 3); points.push("Strong wind. Avoid loose outdoor equipment."); }
+    else if (wind >= 39) { level = Math.max(level, 2); points.push("Windy. Secure light objects and check shade covers."); }
+    else if (wind >= 25) { level = Math.max(level, 1); points.push("Breezy conditions. Light objects may move."); }
+  }
+  const temp = Number(row.temperature);
+  if (isValid(row.temperature)) {
+    if (temp >= 42) { level = Math.max(level, 3); points.push("Extreme heat. Keep activity indoors or very short."); }
+    else if (temp >= 38) { level = Math.max(level, 2); points.push("Very hot. Hydration and shade breaks are important."); }
+    else if (temp >= 34) { level = Math.max(level, 1); points.push("Hot weather. Drink water and use shade."); }
+  }
+  const presets = [
+    { icon:"✅", title:"Good for outdoor activity", message:"Conditions look suitable for normal outdoor activity.", color:"#22c55e" },
+    { icon:"🟡", title:"Outdoor activity is okay with care", message:"Most activities can continue, but use sensible precautions.", color:"#eab308" },
+    { icon:"⚠️", title:"Limit intense outdoor activity", message:"Prefer shade, shorter sessions, and extra breaks.", color:"#f97316" },
+    { icon:"🚫", title:"Move sensitive activity indoors", message:"Conditions are not ideal for outdoor activity.", color:"#ef4444" },
+  ];
+  return { ...presets[level], points: points.slice(0, 3) };
 }
 
 function beaufort(k) {
@@ -215,36 +298,68 @@ function MetricCard({ title, value, unit, sub, color, sparkData, sparkKey, dot, 
   );
 }
 
-function WindCompass({ direction, speed, size = 140 }) {
+function WindDirectionDial({ direction, size = 86, color = "#f59e0b" }) {
   const dir = n(direction, 0);
-  const r = size / 2 - 12, cx = size / 2, cy = size / 2;
-  const rad = (dir - 90) * Math.PI / 180;
-  const ax = cx + r * 0.7 * Math.cos(rad), ay = cy + r * 0.7 * Math.sin(rad);
+  const cx = size / 2, cy = size / 2, r = size / 2 - 9;
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width:"100%", maxWidth:size }}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#334155" strokeWidth="2" />
-      {[["N",0],["E",90],["S",180],["W",270]].map(([l,a])=>{
-        const ar = (a - 90) * Math.PI / 180;
-        return <text key={l} x={cx+(r+10)*Math.cos(ar)} y={cy+(r+10)*Math.sin(ar)} fill="#94a3b8" fontSize="10" textAnchor="middle" dominantBaseline="middle">{l}</text>;
-      })}
-      <line x1={cx} y1={cy} x2={ax} y2={ay} stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
-      <circle cx={ax} cy={ay} r="4" fill="#f59e0b" />
-      <text x={cx} y={cy+4} fill="#f1f5f9" fontSize="12" textAnchor="middle" fontWeight="bold">{display(speed, 1)}</text>
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width:size, height:size, flex:"0 0 auto" }}>
+      <circle cx={cx} cy={cy} r={r} fill="#020617" stroke="#334155" strokeWidth="2" />
+      <text x={cx} y={14} fill="#94a3b8" fontSize="9" textAnchor="middle" fontWeight="700">N</text>
+      <text x={size-12} y={cy+3} fill="#64748b" fontSize="8" textAnchor="middle">E</text>
+      <text x={cx} y={size-8} fill="#64748b" fontSize="8" textAnchor="middle">S</text>
+      <text x={12} y={cy+3} fill="#64748b" fontSize="8" textAnchor="middle">W</text>
+      <g transform={`rotate(${dir} ${cx} ${cy})`}>
+        <line x1={cx} y1={cy+18} x2={cx} y2={cy-r+13} stroke={color} strokeWidth="4" strokeLinecap="round" />
+        <path d={`M ${cx} ${cy-r+5} L ${cx-7} ${cy-r+20} L ${cx+7} ${cy-r+20} Z`} fill={color} />
+      </g>
+      <circle cx={cx} cy={cy} r="4" fill="#f1f5f9" />
     </svg>
   );
 }
 
+function WindSummaryPanel({ row, compact = false }) {
+  const speed = isValid(row?.wind_speed_avg) ? row.wind_speed_avg : row?.wind_speed;
+  const gust = row?.wind_gust;
+  const direction = row?.wind_direction;
+  const compass = degToCompass(direction);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns: compact ? "1fr auto" : "1.2fr .8fr", gap:12, alignItems:"center" }}>
+      <div>
+        <div style={{ fontSize: compact ? 34 : 42, fontWeight:900, color:"#f59e0b", lineHeight:1 }}>
+          {display(speed,1)}<span style={{ fontSize:13, color:"#94a3b8", marginLeft:4 }}>km/h</span>
+        </div>
+        <div style={{ fontSize:12, color:"#94a3b8", marginTop:6 }}>Average wind speed</div>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:10 }}>
+          <span style={{ background:"#f59e0b22", color:"#f59e0b", border:"1px solid #f59e0b44", borderRadius:999, padding:"3px 8px", fontSize:11, fontWeight:800 }}>
+            ↗ From {compass} {isValid(direction) ? `(${display(direction,0)}°)` : ""}
+          </span>
+          <span style={{ background:"#ef444422", color:"#fca5a5", border:"1px solid #ef444444", borderRadius:999, padding:"3px 8px", fontSize:11, fontWeight:700 }}>
+            Gust {display(gust,1)} km/h
+          </span>
+        </div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+        <WindDirectionDial direction={direction} size={compact ? 82 : 124} />
+        <div style={{ color:"#f59e0b", fontWeight:900, fontSize: compact ? 16 : 22, marginTop:4 }}>{compass}</div>
+      </div>
+    </div>
+  );
+}
+
 function aggregateRows(rows, range, fields) {
-  if (range === "24h") return rows;
+  const sorted = [...(rows || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  if (range === "24h") return sorted;
+
+  // Weather apps usually show 7-day and 30-day history as daily points, not dense time-of-day ticks.
+  // Group by local Oman calendar day so the x-axis reads as days/dates.
   const groups = {};
-  rows.forEach(r => {
-    const d = new Date(r.created_at);
-    const key = range === "7d" ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
+  sorted.forEach(r => {
+    const key = localDayKey(r.created_at);
     if (!groups[key]) groups[key] = [];
     groups[key].push(r);
   });
-  return Object.entries(groups).map(([, g]) => {
-    const out = { created_at: g[0].created_at };
+  return Object.entries(groups).map(([key, g]) => {
+    const out = { created_at: g[Math.floor(g.length / 2)]?.created_at || g[0].created_at, day_key: key };
     fields.forEach(field => {
       const vals = g.map(r => r[field]).filter(isValid).map(Number);
       out[field] = vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
@@ -252,7 +367,7 @@ function aggregateRows(rows, range, fields) {
       out[field + "_min"] = vals.length ? Math.min(...vals) : null;
     });
     return out;
-  });
+  }).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig }) {
@@ -303,13 +418,16 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig }) {
   return (
     <div style={{ maxWidth:900, margin:"0 auto" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
-        <button onClick={onBack} style={{ background:"none", border:"1px solid #334155", color:"#94a3b8", borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:14 }}>← Back</button>
-        <h2 style={{ fontSize:20, fontWeight:700, color, margin:0 }}>{title}</h2>
+        <button onClick={onBack} style={{ background:"#0f172a", border:"1px solid #334155", color:"#f1f5f9", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:14, fontWeight:700 }}>← Dashboard</button>
+        <div>
+          <div style={{ fontSize:10, color:"#64748b", letterSpacing:1, textTransform:"uppercase" }}>Details</div>
+          <h2 style={{ fontSize:20, fontWeight:700, color, margin:0 }}>{title}</h2>
+        </div>
       </div>
 
       {renderExtras && renderExtras()}
 
-      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+      <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
         {["24h","7d","30d"].map(r => (
           <button key={r} onClick={() => setRange(r)}
             style={{ background: range===r ? color+"33" : "#1e293b", border: range===r ? `1px solid ${color}` : "1px solid #334155",
@@ -318,13 +436,14 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig }) {
           </button>
         ))}
       </div>
+      <div style={{ fontSize:11, color:"#64748b", marginBottom:12 }}>📈 {chartRangeLabel(range)}</div>
 
       <div style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:16, marginBottom:16 }}>
         {error ? <div style={{ textAlign:"center", padding:40, color:"#ef4444" }}>{error}</div> : loading ? <div style={{ textAlign:"center", padding:40, color:"#64748b" }}>Loading...</div> : (
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis dataKey="created_at" tickFormatter={range==="30d" ? fmtDate : fmtTime} stroke="#475569" fontSize={10} interval="preserveStartEnd" />
+              <XAxis dataKey="created_at" tickFormatter={(value) => fmtChartTick(value, range)} stroke="#475569" fontSize={10} interval="preserveStartEnd" minTickGap={range === "24h" ? 26 : 16} tickMargin={8} />
               <YAxis stroke="#475569" fontSize={10} domain={["auto","auto"]} />
               <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #334155", borderRadius:8, fontSize:12, color:"#f1f5f9" }} labelFormatter={fmtDateTime} />
               {(range==="7d"||range==="30d") && data[0] && (chartConfig.fields[0]+"_max") in data[0] &&
@@ -395,6 +514,35 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [error, setError] = useState("");
 
+  const openPage = useCallback((next) => {
+    if (!DETAIL_PAGE_KEYS.has(next)) return;
+    if (typeof window !== "undefined") {
+      window.history.pushState({ page: next }, "", `#${next}`);
+    }
+    setPage(next);
+  }, []);
+
+  const goHome = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.history.replaceState({ page: "home" }, "", window.location.pathname + window.location.search);
+    }
+    setPage("home");
+  }, []);
+
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const hash = window.location.hash.replace(/^#/, "");
+      setPage(DETAIL_PAGE_KEYS.has(hash) ? hash : "home");
+    };
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    window.addEventListener("hashchange", syncFromLocation);
+    return () => {
+      window.removeEventListener("popstate", syncFromLocation);
+      window.removeEventListener("hashchange", syncFromLocation);
+    };
+  }, []);
+
   const fetchCurrent = useCallback(async () => {
     try {
       const data = await fetchLatestAndHistory();
@@ -424,6 +572,7 @@ export default function App() {
   const dp = current ? dewPoint(current.temperature, current.humidity) : null;
   const battPct = current ? batteryPercent(current) : null;
   const loadW = current ? systemLoadWatts(current) : null;
+  const guidance = current ? activityGuidance(current) : activityGuidance(null);
   // Keep the one-second tick active so the live age text refreshes.
   void tick;
 
@@ -456,17 +605,15 @@ export default function App() {
       pressure: { title:"Pressure", unit:"hPa", color:"#8b5cf6", fields:["pressure"], labels:["Pressure"] },
       wind: { title:"Wind", unit:"km/h", color:"#f59e0b", fields:["wind_speed_avg","wind_gust"], labels:["Average","Gust"], colors:["#f59e0b","#ef4444"],
         extras: () => (
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
-            <div style={{ background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:14, textAlign:"center" }}>
-              <WindCompass direction={current.wind_direction} speed={current.wind_speed} size={160} />
-              <div style={{ color:"#f59e0b", fontWeight:700, marginTop:4 }}>{degToCompass(current.wind_direction)} ({display(current.wind_direction, 0)}°)</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1.4fr .8fr", gap:12, marginBottom:16 }} className="detailGrid">
+            <div style={{ background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:16 }}>
+              <WindSummaryPanel row={current} />
             </div>
             <div style={{ background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:14 }}>
-              <div style={{ fontSize:10, color:"#64748b" }}>BEAUFORT SCALE</div>
-              <div style={{ fontSize:28, fontWeight:700, color:"#f59e0b" }}>Force {beaufort(current.wind_speed)}</div>
-              <div style={{ fontSize:13, color:"#94a3b8" }}>{beaufortDesc(beaufort(current.wind_speed))}</div>
-              <div style={{ fontSize:10, color:"#64748b", marginTop:12 }}>GUST</div>
-              <div style={{ fontSize:22, fontWeight:700, color:"#ef4444" }}>{display(current.wind_gust, 1)} km/h</div>
+              <div style={{ fontSize:10, color:"#64748b", letterSpacing:1, textTransform:"uppercase" }}>Wind comfort</div>
+              <div style={{ fontSize:28, fontWeight:900, color:"#f59e0b" }}>Force {beaufort(current.wind_speed_avg || current.wind_speed)}</div>
+              <div style={{ fontSize:13, color:"#94a3b8", marginBottom:10 }}>{beaufortDesc(beaufort(current.wind_speed_avg || current.wind_speed))}</div>
+              <div style={{ fontSize:12, color:"#cbd5e1", lineHeight:1.45 }}>🌬️ {windAdvice(current.wind_gust || current.wind_speed_avg || current.wind_speed)}</div>
             </div>
           </div>
         )},
@@ -528,7 +675,7 @@ export default function App() {
       return (
         <div style={{ minHeight:"100vh", background:"linear-gradient(180deg,#020617,#0f172a,#020617)", color:"#f1f5f9", fontFamily:"system-ui", padding:"20px 16px" }}>
           <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} *{box-sizing:border-box}`}</style>
-          <DetailPage title={cfg.title} unit={cfg.unit} color={cfg.color} onBack={() => setPage("home")}
+          <DetailPage title={cfg.title} unit={cfg.unit} color={cfg.color} onBack={goHome}
             renderExtras={cfg.extras} chartConfig={{ fields: cfg.fields, labels: cfg.labels, colors: cfg.colors, bars: cfg.bars, barColors: cfg.barColors, barLabels: cfg.barLabels }} />
         </div>
       );
@@ -537,7 +684,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(180deg,#020617,#0f172a,#020617)", color:"#f1f5f9", fontFamily:"system-ui", padding:"20px 16px" }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} *{box-sizing:border-box;margin:0;padding:0} @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}.detailGrid{grid-template-columns:1fr!important}} @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}}`}</style>
 
       <div className="headerWrap" style={{ maxWidth:900, margin:"0 auto 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
         <div>
@@ -554,68 +701,72 @@ export default function App() {
 
       {current && (
         <div style={{ maxWidth:900, margin:"0 auto", display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, animation:"fadeIn .5s ease" }} className="dashGrid">
-          <div className="wide" style={{ gridColumn:"span 3", background:pmColor(current.pm2_5)+"15", border:`1px solid ${pmColor(current.pm2_5)}55`, borderRadius:12, padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          <div className="wide" style={{ gridColumn:"span 3", background:guidance.color+"15", border:`1px solid ${guidance.color}55`, borderRadius:14, padding:"14px 16px", display:"grid", gridTemplateColumns:"auto 1fr auto", alignItems:"center", gap:14 }}>
+            <div style={{ fontSize:32 }}>{guidance.icon}</div>
             <div>
               <div style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase" }}>OUTDOOR ACTIVITY GUIDANCE</div>
-              <div style={{ fontSize:16, fontWeight:800, color:pmColor(current.pm2_5) }}>{pmLabel(current.pm2_5)}</div>
-              <div style={{ fontSize:12, color:"#94a3b8" }}>{pmAdvice(current.pm2_5)}</div>
+              <div style={{ fontSize:17, fontWeight:900, color:guidance.color }}>{guidance.title}</div>
+              <div style={{ fontSize:12, color:"#cbd5e1", marginTop:2 }}>{guidance.message}</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:8 }}>
+                {guidance.points.map((p, i) => (
+                  <span key={i} style={{ border:"1px solid #334155", background:"#020617", borderRadius:999, padding:"3px 8px", fontSize:10, color:"#94a3b8" }}>{p}</span>
+                ))}
+              </div>
             </div>
-            <div style={{ textAlign:"right", color:pmColor(current.pm2_5), fontWeight:800, fontSize:24 }}>{displayInt(current.pm2_5)}<span style={{ fontSize:12, color:"#94a3b8", marginLeft:4 }}>PM2.5</span></div>
+            <div style={{ textAlign:"right", minWidth:86 }}>
+              <div style={{ color:pmColor(current.pm2_5), fontWeight:900, fontSize:22 }}>🌫️ {displayInt(current.pm2_5)}</div>
+              <div style={{ color:uvColor(current.uv_index), fontWeight:800, fontSize:16 }}>☀️ UV {display(current.uv_index,1)}</div>
+            </div>
           </div>
 
           <MetricCard title="Temperature" value={display(current.temperature,1)} unit="°C" color="#f59e0b"
             sub={`Feels ${fl == null ? "--" : fl.toFixed(1)}°C`} sparkData={history} sparkKey="temperature"
-            dot={<Dot value={current.temperature} lastUpdate={current.created_at} />} onClick={() => setPage("temperature")} />
+            dot={<Dot value={current.temperature} lastUpdate={current.created_at} />} onClick={() => openPage("temperature")} />
 
           <MetricCard title="Humidity" value={display(current.humidity,0)} unit="%" color="#3b82f6"
             sub={`Dew ${dp == null ? "--" : dp.toFixed(1)}°C`} sparkData={history} sparkKey="humidity"
-            dot={<Dot value={current.humidity} lastUpdate={current.created_at} />} onClick={() => setPage("humidity")} />
+            dot={<Dot value={current.humidity} lastUpdate={current.created_at} />} onClick={() => openPage("humidity")} />
 
           <MetricCard title="Pressure" value={display(current.pressure,1)} unit="hPa" color="#8b5cf6"
             sparkData={history} sparkKey="pressure"
-            dot={<Dot value={current.pressure} lastUpdate={current.created_at} />} onClick={() => setPage("pressure")} />
+            dot={<Dot value={current.pressure} lastUpdate={current.created_at} />} onClick={() => openPage("pressure")} />
 
-          <div onClick={() => setPage("wind")} style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:"14px 16px", cursor:"pointer", position:"relative", minHeight:132 }}
+          <div onClick={() => openPage("wind")} style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:"14px 16px", cursor:"pointer", position:"relative", minHeight:132 }}
             onMouseEnter={e=>e.currentTarget.style.borderColor="#64748b"} onMouseLeave={e=>e.currentTarget.style.borderColor="#334155"}>
-            <div style={{ display:"flex", justifyContent:"space-between" }}>
-              <span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase" }}>WIND</span>
-              <Dot value={current.wind_speed} lastUpdate={current.created_at} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase" }}>🌬️ WIND</span>
+              <Dot value={current.wind_speed_avg || current.wind_speed} lastUpdate={current.created_at} />
             </div>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"center", margin:"4px 0" }}>
-              <WindCompass direction={current.wind_direction} speed={isValid(current.wind_speed_avg) ? current.wind_speed_avg : current.wind_speed} size={120} />
-            </div>
-            <div style={{ textAlign:"center", fontSize:11, color:"#94a3b8" }}>
-              {degToCompass(current.wind_direction)} | Gust: {display(current.wind_gust,1)}
-            </div>
-            <div style={{ position:"absolute", bottom:8, right:12, fontSize:10, color:"#475569" }}>tap →</div>
+            <WindSummaryPanel row={current} compact />
+            <div style={{ position:"absolute", bottom:8, right:12, fontSize:10, color:"#475569" }}>tap for details →</div>
           </div>
 
           <MetricCard title="Air Quality" value={displayInt(current.pm2_5)} unit="µg/m³"
             color={pmColor(current.pm2_5)} sub={`PM2.5 — ${pmLabel(current.pm2_5)}`}
             sparkData={history} sparkKey="pm2_5"
-            dot={<Dot value={current.pm2_5} lastUpdate={current.created_at} />} onClick={() => setPage("air-quality")} />
+            dot={<Dot value={current.pm2_5} lastUpdate={current.created_at} />} onClick={() => openPage("air-quality")} />
 
           <MetricCard title="UV Index" value={display(current.uv_index,1)} unit=""
             color={uvColor(current.uv_index)} sub={uvLabel(current.uv_index)}
             sparkData={history} sparkKey="uv_index"
-            dot={<Dot value={current.uv_index} lastUpdate={current.created_at} />} onClick={() => setPage("uv")} />
+            dot={<Dot value={current.uv_index} lastUpdate={current.created_at} />} onClick={() => openPage("uv")} />
 
           <MetricCard title="Battery" value={display(current.battery_voltage,2)} unit="V"
             color={n(current.battery_voltage,0) > 3.1 ? "#22c55e" : "#ef4444"}
             sub={`${battPct == null ? "--" : battPct}% | ${display(current.battery_current,0)}mA load`}
             sparkData={history} sparkKey="battery_voltage"
-            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => setPage("battery")} />
+            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => openPage("battery")} />
 
           <MetricCard title="Power Use" value={loadW == null ? "--" : loadW.toFixed(2)} unit="W"
             color="#f59e0b" sub="board + sensors from 10Ah battery"
             sparkData={history} sparkKey="system_load_watts"
-            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => setPage("power")} />
+            dot={<Dot value={current.battery_voltage} lastUpdate={current.created_at} />} onClick={() => openPage("power")} />
 
           <MetricCard title="Signal" value={displayInt(current.rssi)} unit="dBm"
             color={n(current.rssi,-100) > -70 ? "#22c55e" : n(current.rssi,-100) > -85 ? "#eab308" : "#ef4444"}
             sub={isValid(current.lora_rssi) ? `LoRa: ${current.lora_rssi}dBm` : (current.route === "direct" ? "Direct WiFi" : "Relay status")}
             sparkData={history} sparkKey="rssi"
-            dot={<Dot value={current.rssi || 1} lastUpdate={current.created_at} />} onClick={() => setPage("signal")} />
+            dot={<Dot value={current.rssi || 1} lastUpdate={current.created_at} />} onClick={() => openPage("signal")} />
 
           <div style={{ gridColumn:"span 3" }} className="wide">
             <RouteDiagram route={current.route || "direct"} />

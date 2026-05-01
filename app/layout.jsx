@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "School Solar Weather Station",
+  title: "Solar Weather Station — Izki, Oman",
   description: "Live weather and air-quality readings from a solar-powered school weather station",
 };
 

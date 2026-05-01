@@ -330,18 +330,21 @@ function Dot({ value, lastUpdate }) {
   return <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:c, marginLeft:6, verticalAlign:"middle", animation: c==="#22c55e"?"pulse 2s infinite":"none" }} />;
 }
 
-function MetricCard({ title, value, unit, sub, color, sparkData, sparkKey, dot, onClick }) {
+function MetricCard({ icon, title, value, unit, sub, color, sparkData, sparkKey, dot, onClick }) {
   return (
-    <div onClick={onClick} style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:"14px 16px", cursor:"pointer", transition:"border-color 0.2s", position:"relative", minHeight:132 }}
+    <div onClick={onClick} style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:"14px 16px", cursor:"pointer", transition:"border-color 0.2s", position:"relative", minHeight:138 }}
       onMouseEnter={e => e.currentTarget.style.borderColor="#64748b"} onMouseLeave={e => e.currentTarget.style.borderColor="#334155"}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-        <span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase" }}>{title}</span>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ width:28, height:28, display:"inline-flex", alignItems:"center", justifyContent:"center", borderRadius:10, background:(color||"#3b82f6")+"18", border:`1px solid ${(color||"#3b82f6")}55`, fontSize:16 }}>{icon}</span>
+          <span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase", fontWeight:800 }}>{title}</span>
+        </div>
         {dot}
       </div>
-      <div style={{ fontSize:26, fontWeight:700, color: color||"#f1f5f9", lineHeight:1.1 }}>
+      <div style={{ fontSize:26, fontWeight:800, color: color||"#f1f5f9", lineHeight:1.1 }}>
         {value}<span style={{ fontSize:13, color:"#64748b", marginLeft:3 }}>{unit}</span>
       </div>
-      {sub && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize:11, color:"#64748b", marginTop:3 }}>{sub}</div>}
       {sparkData && sparkKey && <Spark data={sparkData} dataKey={sparkKey} color={color||"#3b82f6"} h={30} />}
       <div style={{ position:"absolute", bottom:8, right:12, fontSize:10, color:"#475569" }}>tap for details →</div>
     </div>
@@ -408,33 +411,41 @@ const statusSubStyle = { fontSize:10, color:"#64748b", marginTop:5, lineHeight:1
 function StationHealthPanel({ row, battPct, loadW, onOpen }) {
   const wifi = wifiQuality(row?.rssi);
   const rf = rfQuality(row);
-  const q = isValid(row?.queue_count) ? Number(row.queue_count) : 0;
+  const routeIsRelay = row?.route === "relay";
+  const rfCard = isValid(row?.lora_rssi)
+    ? { value: rf.label, sub: rf.text, color: rf.color, bars: rf.bars }
+    : { value: routeIsRelay ? "Waiting" : "Standby", sub: routeIsRelay ? "Relay signal not reported yet" : "Direct WiFi active", color: routeIsRelay ? "#eab308" : "#64748b", bars: 0 };
+  const routeCard = row?.route === "relay"
+    ? { value:"Indoor relay", sub:"Indoor unit forwarded the reading", color:"#3b82f6" }
+    : row?.route === "direct"
+      ? { value:"Direct upload", sub:"Outdoor station sent the reading", color:"#22c55e" }
+      : { value: routeFriendly(row?.route), sub:"Waiting for route", color:"#64748b" };
+
   const items = [
-    { label:"Battery", value:battPct == null ? "--" : `${battPct}%`, sub:`${display(row?.battery_voltage,3)}V · 10Ah solar battery`, color:batteryStateLabel(battPct).color, page:"battery" },
-    { label:"Power use", value:loadW == null ? "--" : `${loadW.toFixed(2)}W`, sub:`Board + sensors · ${display(row?.battery_current,1)}mA`, color:"#f59e0b", page:"power" },
-    { label:"WiFi", value:wifi.label, sub:`${displayInt(row?.rssi)} dBm`, color:wifi.color, page:"signal", bars:wifi.bars },
-    { label:"Outdoor RF", value:rf.label, sub:rf.text, color:rf.color, page:"signal", bars:rf.bars },
-    { label:"Route", value:routeFriendly(row?.route), sub:row?.route === "relay" ? "Indoor unit forwarded data" : "Outdoor uploaded directly", color:row?.route === "relay" ? "#3b82f6" : "#22c55e", page:"signal" },
-    { label:"Pending data", value:String(q), sub:q === 0 ? "No backlog" : "Waiting to upload", color:q === 0 ? "#22c55e" : "#eab308", page:"signal" },
+    { icon:"🔋", label:"Battery", value:battPct == null ? "--" : `${battPct}%`, sub:`${display(row?.battery_voltage,3)}V · 10Ah solar battery`, color:batteryStateLabel(battPct).color, page:"battery" },
+    { icon:"⚡", label:"Power use", value:loadW == null ? "--" : `${loadW.toFixed(2)}W`, sub:`Board + sensors · ${display(row?.battery_current,1)}mA`, color:"#f59e0b", page:"power" },
+    { icon:"📶", label:"WiFi signal", value:wifi.label, sub:`${displayInt(row?.rssi)} dBm`, color:wifi.color, page:"signal", bars:wifi.bars },
+    { icon:"🛰️", label:"RF link", value:rfCard.value, sub:rfCard.sub, color:rfCard.color, page:"signal", bars:rfCard.bars },
+    { icon:"🔁", label:"Data route", value:routeCard.value, sub:routeCard.sub, color:routeCard.color, page:"signal" },
   ];
   return (
     <div className="wide" style={{ gridColumn:"span 3", background:"#0f172a", border:"1px solid #334155", borderRadius:14, padding:14 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginBottom:12 }}>
-        <div>
-          <div style={{ fontSize:12, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase", fontWeight:800 }}>Station health</div>
-          <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>Power, signal, route, and data delivery status.</div>
-        </div>
-        <a href="/debug-weather-nr" style={{ color:"#64748b", fontSize:11, textDecoration:"none", border:"1px solid #334155", borderRadius:999, padding:"5px 10px" }}>Debug →</a>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ fontSize:12, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase", fontWeight:800 }}>Station health</div>
+        <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>Battery, power, connection, and data delivery status.</div>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8 }} className="healthGrid">
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }} className="healthGrid">
         {items.map(item => (
-          <button key={item.label} onClick={() => item.page && onOpen(item.page)} style={{ background:"#020617", border:"1px solid #1e293b", borderRadius:10, padding:"9px 8px", textAlign:"left", cursor:item.page ? "pointer" : "default", color:"inherit", minHeight:80 }}>
-            <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.6 }}>{item.label}</div>
+          <button key={item.label} onClick={() => item.page && onOpen(item.page)} style={{ background:"#020617", border:"1px solid #1e293b", borderRadius:10, padding:"10px 8px", textAlign:"left", cursor:item.page ? "pointer" : "default", color:"inherit", minHeight:88 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}>
+              <span style={{ width:24, height:24, display:"inline-flex", alignItems:"center", justifyContent:"center", borderRadius:8, background:item.color+"18", border:`1px solid ${item.color}44`, fontSize:14 }}>{item.icon}</span>
+              <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.6 }}>{item.label}</div>
+            </div>
             <div style={{ fontSize:15, fontWeight:900, color:item.color, marginTop:4, display:"flex", gap:6, alignItems:"center" }}>
               {item.bars != null && <SignalBars bars={item.bars} color={item.color} />}
               <span>{item.value}</span>
             </div>
-            <div style={{ fontSize:10, color:"#64748b", marginTop:4, lineHeight:1.2 }}>{item.sub}</div>
+            <div style={{ fontSize:10, color:"#64748b", marginTop:5, lineHeight:1.2 }}>{item.sub}</div>
           </button>
         ))}
       </div>
@@ -863,36 +874,34 @@ export default function App() {
             </div>
           </div>
 
-          <StationStatusStrip row={current} battPct={battPct} loadW={loadW} onOpen={openPage} />
-
-          <MetricCard title="Temperature" value={display(current.temperature,1)} unit="°C" color="#f59e0b"
+          <MetricCard icon="🌡️" title="Temperature" value={display(current.temperature,1)} unit="°C" color="#f59e0b"
             sub={`Feels ${fl == null ? "--" : fl.toFixed(1)}°C`} sparkData={history} sparkKey="temperature"
             dot={<Dot value={current.temperature} lastUpdate={current.created_at} />} onClick={() => openPage("temperature")} />
 
-          <MetricCard title="Humidity" value={display(current.humidity,0)} unit="%" color="#3b82f6"
+          <MetricCard icon="💧" title="Humidity" value={display(current.humidity,0)} unit="%" color="#3b82f6"
             sub={`Dew ${dp == null ? "--" : dp.toFixed(1)}°C`} sparkData={history} sparkKey="humidity"
             dot={<Dot value={current.humidity} lastUpdate={current.created_at} />} onClick={() => openPage("humidity")} />
 
-          <MetricCard title="Pressure" value={display(current.pressure,1)} unit="hPa" color="#8b5cf6"
+          <MetricCard icon="🧭" title="Pressure" value={display(current.pressure,1)} unit="hPa" color="#8b5cf6"
             sparkData={history} sparkKey="pressure"
             dot={<Dot value={current.pressure} lastUpdate={current.created_at} />} onClick={() => openPage("pressure")} />
 
           <div onClick={() => openPage("wind")} style={{ background:"linear-gradient(145deg,#0f172a,#1e293b)", border:"1px solid #334155", borderRadius:12, padding:"14px 16px", cursor:"pointer", position:"relative", minHeight:132 }}
             onMouseEnter={e=>e.currentTarget.style.borderColor="#64748b"} onMouseLeave={e=>e.currentTarget.style.borderColor="#334155"}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-              <span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase" }}>🌬️ WIND</span>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}><span style={{ width:28, height:28, display:"inline-flex", alignItems:"center", justifyContent:"center", borderRadius:10, background:"#f59e0b18", border:"1px solid #f59e0b55", fontSize:16 }}>🌬️</span><span style={{ fontSize:11, color:"#94a3b8", letterSpacing:1, textTransform:"uppercase", fontWeight:800 }}>Wind</span></div>
               <Dot value={current.wind_speed_avg || current.wind_speed} lastUpdate={current.created_at} />
             </div>
             <WindSummaryPanel row={current} compact />
             <div style={{ position:"absolute", bottom:8, right:12, fontSize:10, color:"#475569" }}>tap for details →</div>
           </div>
 
-          <MetricCard title="Air Quality" value={displayInt(current.pm2_5)} unit="µg/m³"
+          <MetricCard icon="🌫️" title="Air Quality" value={displayInt(current.pm2_5)} unit="µg/m³"
             color={pmColor(current.pm2_5)} sub={`PM2.5 — ${pmLabel(current.pm2_5)}`}
             sparkData={history} sparkKey="pm2_5"
             dot={<Dot value={current.pm2_5} lastUpdate={current.created_at} />} onClick={() => openPage("air-quality")} />
 
-          <MetricCard title="UV Index" value={display(current.uv_index,1)} unit=""
+          <MetricCard icon="☀️" title="UV Index" value={display(current.uv_index,1)} unit=""
             color={uvColor(current.uv_index)} sub={uvLabel(current.uv_index)}
             sparkData={history} sparkKey="uv_index"
             dot={<Dot value={current.uv_index} lastUpdate={current.created_at} />} onClick={() => openPage("uv")} />

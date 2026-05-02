@@ -116,7 +116,8 @@ const I18N = {
     themeWind: "Windy mode",
     themeHaze: "Hazy air mode",
     themeDay: "Day mode",
-    themeNight: "Night mode",
+    themeNight: "Night theme",
+    modeNormal: "Normal conditions",
   },
   ar: {
     langName: "العربية",
@@ -213,7 +214,8 @@ const I18N = {
     themeWind: "وضع الرياح",
     themeHaze: "وضع الغبار والضباب",
     themeDay: "وضع النهار",
-    themeNight: "وضع الليل",
+    themeNight: "النمط الليلي",
+    modeNormal: "ظروف طبيعية",
   }
 };
 
@@ -281,11 +283,15 @@ function fmtDateTime(d, lang = "en") {
   return new Date(d).toLocaleString(localeFor(lang), { timeZone: OMAN_TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function omanHour(row) {
-  const d = row?.device_time || row?.created_at;
-  if (!d) return null;
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: OMAN_TZ, hour: "2-digit", hour12: false }).formatToParts(new Date(d));
-  return Number(parts.find(p => p.type === "hour")?.value || 0);
+function omanHourAt(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: OMAN_TZ, hour: "2-digit", hour12: false }).formatToParts(date);
+  const hour = Number(parts.find(p => p.type === "hour")?.value || 0);
+  return hour === 24 ? 0 : hour;
+}
+
+function isCurrentOmanNight() {
+  const hour = omanHourAt(new Date());
+  return hour >= 18 || hour < 6;
 }
 
 function ageSeconds(d) {
@@ -303,12 +309,43 @@ function dotColor(v, lastUpdate) {
   return age > 20 ? "#ef4444" : age > 7 ? "#eab308" : "#22c55e";
 }
 
-function stationLabel(lastUpdate, t) {
+function formatAgeDuration(totalSeconds, lang = "en") {
+  if (!Number.isFinite(totalSeconds)) return "--";
+  const sec = Math.max(0, Math.round(totalSeconds));
+  if (sec < 60) {
+    return lang === "ar" ? `${sec} ثانية` : `${sec}s`;
+  }
+
+  const minutes = Math.floor(sec / 60);
+  if (minutes < 60) {
+    return lang === "ar" ? `${minutes} دقيقة` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours < 24) {
+    if (lang === "ar") return mins ? `${hours} ساعة و${mins} دقيقة` : `${hours} ساعة`;
+    return mins ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  if (lang === "ar") return remHours ? `${days} يوم و${remHours} ساعة` : `${days} يوم`;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
+}
+
+function agoText(totalSeconds, lang = "en") {
+  const duration = formatAgeDuration(totalSeconds, lang);
+  return lang === "ar" ? `قبل ${duration}` : `${duration} ago`;
+}
+
+function stationLabel(lastUpdate, t, lang = "en") {
   const age = ageSeconds(lastUpdate);
   if (!Number.isFinite(age)) return t.waiting.toUpperCase();
-  if (age <= 420) return `${t.live} — ${age}${t.agoSec}`;
-  if (age <= 1200) return `${t.delayed} — ${Math.round(age / 60)}${t.agoMin}`;
-  return `${t.offline} — ${Math.round(age / 60)}${t.agoMin}`;
+  const ago = agoText(age, lang);
+  if (age <= 420) return `${t.live} — ${ago}`;
+  if (age <= 1200) return `${t.delayed} — ${ago}`;
+  return `${t.offline} — ${ago}`;
 }
 
 function stationColor(lastUpdate) {
@@ -538,29 +575,77 @@ function batteryStateLabel(pct, t) {
 }
 
 function weatherTheme(row, t) {
-  const hour = omanHour(row);
-  const night = hour == null ? false : hour >= 18 || hour < 6;
-  const temp = n(row?.temperature, 0);
-  const uv = n(row?.uv_index, 0);
-  const pm = n(row?.pm2_5, 0);
-  const wind = Math.max(n(row?.wind_gust, 0), n(row?.wind_speed_avg, 0), n(row?.wind_speed, 0));
+  const night = isCurrentOmanNight();
+  const age = ageSeconds(row?.created_at);
+  const isFresh = Number.isFinite(age) && age <= 20 * 60;
 
-  const base = {
-    text:"#f8fafc",
-    muted:"#94a3b8",
-    soft:"#64748b",
-    panel:"rgba(15,23,42,.90)",
-    panel2:"rgba(2,6,23,.86)",
-    border:"rgba(51,65,85,.95)",
-    chip:"rgba(2,6,23,.72)",
-    chartGrid:"#1e293b",
+  const temp = isFresh ? n(row?.temperature, 0) : 0;
+  const uv = isFresh ? n(row?.uv_index, 0) : 0;
+  const pm = isFresh ? n(row?.pm2_5, 0) : 0;
+  const wind = isFresh ? Math.max(n(row?.wind_gust, 0), n(row?.wind_speed_avg, 0), n(row?.wind_speed, 0)) : 0;
+
+  let mode = "normal";
+  let modeLabel = t.modeNormal;
+  let modeIcon = night ? "🌙" : "☀️";
+  let modeAccent = night ? "#60a5fa" : "#0ea5e9";
+
+  if (isFresh) {
+    if (pm > 55) {
+      mode = "haze";
+      modeLabel = t.themeHaze;
+      modeIcon = "🌫️";
+      modeAccent = "#eab308";
+    } else if (temp >= 40 || uv >= 8) {
+      mode = "heat";
+      modeLabel = t.themeHot;
+      modeIcon = "🔥";
+      modeAccent = "#f97316";
+    } else if (wind >= 35 && temp < 39) {
+      mode = "wind";
+      modeLabel = t.themeWind;
+      modeIcon = "🌬️";
+      modeAccent = "#22d3ee";
+    }
+  }
+
+  const common = {
+    mode,
+    modeLabel,
+    modeIcon,
+    isFresh,
+    text: night ? "#f8fafc" : "#f8fafc",
+    muted: night ? "#94a3b8" : "#dbeafe",
+    soft: night ? "#64748b" : "#bfdbfe",
+    panel: night ? "rgba(15,23,42,.90)" : "rgba(12,74,110,.70)",
+    panel2: night ? "rgba(2,6,23,.86)" : "rgba(8,47,73,.66)",
+    border: night ? "rgba(51,65,85,.95)" : "rgba(125,211,252,.45)",
+    chip: night ? "rgba(2,6,23,.72)" : "rgba(8,47,73,.55)",
+    chartGrid: night ? "#1e293b" : "rgba(186,230,253,.22)",
+    accent: modeAccent,
+    card: night
+      ? "linear-gradient(145deg,rgba(15,23,42,.96),rgba(30,41,59,.92))"
+      : "linear-gradient(145deg,rgba(15,23,42,.80),rgba(12,74,110,.72))",
   };
 
-  if (night) return { ...base, key:"night", label:t.themeNight, icon:"🌙", bg:"linear-gradient(180deg,#020617,#0f172a 46%,#111827)", header:"linear-gradient(90deg,#60a5fa,#a78bfa)", accent:"#60a5fa", card:"linear-gradient(145deg,rgba(15,23,42,.96),rgba(30,41,59,.92))" };
-  if (pm > 55) return { ...base, key:"haze", label:t.themeHaze, icon:"🌫️", bg:"linear-gradient(180deg,#292524,#57534e 48%,#fef3c7)", header:"linear-gradient(90deg,#f59e0b,#a16207)", accent:"#eab308", card:"linear-gradient(145deg,rgba(41,37,36,.92),rgba(68,64,60,.88))" };
-  if (temp >= 40 || uv >= 8) return { ...base, key:"heat", label:t.themeHot, icon:"🔥", bg:"linear-gradient(180deg,#7f1d1d,#f97316 46%,#fef3c7)", header:"linear-gradient(90deg,#fbbf24,#ef4444)", accent:"#f97316", card:"linear-gradient(145deg,rgba(69,26,3,.92),rgba(127,29,29,.86))" };
-  if (wind >= 35 && temp < 39) return { ...base, key:"wind", label:t.themeWind, icon:"🌬️", bg:"linear-gradient(180deg,#0f172a,#0e7490 48%,#dbeafe)", header:"linear-gradient(90deg,#22d3ee,#3b82f6)", accent:"#22d3ee", card:"linear-gradient(145deg,rgba(8,47,73,.92),rgba(15,23,42,.88))" };
-  return { ...base, key:"day", label:t.themeDay, icon:"☀️", bg:"linear-gradient(180deg,#0369a1,#38bdf8 45%,#fff7ed)", header:"linear-gradient(90deg,#f59e0b,#0ea5e9)", accent:"#0ea5e9", card:"linear-gradient(145deg,rgba(15,23,42,.90),rgba(12,74,110,.86))" };
+  if (night) {
+    return {
+      ...common,
+      key:"night",
+      label:t.themeNight,
+      icon:"🌙",
+      bg:"linear-gradient(180deg,#020617,#0f172a 48%,#111827)",
+      header:"linear-gradient(90deg,#60a5fa,#a78bfa)",
+    };
+  }
+
+  return {
+    ...common,
+    key:"day",
+    label:t.themeDay,
+    icon:"☀️",
+    bg:"linear-gradient(180deg,#0369a1,#38bdf8 46%,#fff7ed)",
+    header:"linear-gradient(90deg,#f59e0b,#0ea5e9)",
+  };
 }
 
 async function fetchLatestAndHistory() {
@@ -1075,14 +1160,14 @@ export default function App() {
           <h1 style={{ fontSize:22, fontWeight:900, margin:0, background:theme.header, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", textTransform: lang === "ar" ? "none" : "uppercase" }}>{t.title}</h1>
           <div style={{ fontSize:11, color:theme.muted }}>{t.location}</div>
           <div style={{ display:"inline-flex", alignItems:"center", gap:6, marginTop:6, border:`1px solid ${theme.border}`, background:theme.chip, borderRadius:999, padding:"3px 9px", color:theme.muted, fontSize:10 }}>
-            <span>{theme.icon}</span><span>{theme.label}</span>
+            <span>{theme.icon}</span><span>{theme.label}</span><span style={{ color:theme.soft }}>·</span><span>{theme.modeIcon}</span><span>{theme.modeLabel}</span>
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", justifyContent: lang === "ar" ? "flex-start" : "flex-end" }}>
           <button onClick={toggleLang} style={{ border:`1px solid ${theme.border}`, background:theme.panel, color:theme.text, borderRadius:999, padding:"7px 12px", cursor:"pointer", fontWeight:900 }}>{t.switchLang}</button>
           <div style={{ display:"flex", alignItems:"center", gap:6, background:theme.chip, border:`1px solid ${theme.border}`, borderRadius:999, padding:"7px 11px" }}>
             <div style={{ width:8, height:8, borderRadius:"50%", background:stationColor(current?.created_at), animation: ageSeconds(current?.created_at)<=420?"pulse 2s infinite":"none" }} />
-            <span style={{ fontSize:11, color:theme.muted }}>{stationLabel(current?.created_at, t)}</span>
+            <span style={{ fontSize:11, color:theme.muted }}>{stationLabel(current?.created_at, t, lang)}</span>
           </div>
         </div>
       </div>

@@ -279,6 +279,12 @@ export default function DebugPage() {
       directCount: rowsAsc.filter(r => r.route === "direct").length,
       relayCount: rowsAsc.filter(r => r.route === "relay").length,
       queuedCount: rowsAsc.filter(r => Number(r.queue_count || 0) > 0).length,
+      wasQueuedCount: rowsAsc.filter(r => r.was_queued === true).length,
+      relayTimeoutCount: rowsAsc.filter(r => r.relay_ack === "TIMEOUT").length,
+      relayNowiCount: rowsAsc.filter(r => r.relay_ack === "ACK_NOWI").length,
+      directAttemptCount: rowsAsc.filter(r => r.direct_attempted === true).length,
+      relayAttemptCount: rowsAsc.filter(r => r.relay_attempted === true).length,
+      uploadFailRows: rowsAsc.filter(r => isValid(r.upload_http_code) && Number(r.upload_http_code) >= 400).length,
       wifiFailCount: countFalse(rowsAsc, "wifi_ok"),
       loraFailCount: countFalse(rowsAsc, "lora_ok"),
       bmeFailCount: countFalse(rowsAsc, "bme_ok"),
@@ -301,7 +307,7 @@ export default function DebugPage() {
         <div>
           <p className="kicker">Hidden technical page</p>
           <h1>Debug</h1>
-          <p>Operational telemetry, routing history, sensor data, link quality, and outage detection. No passwords, tokens, or keys are shown here.</p>
+          <p>Operational telemetry, routing history, sensor data, link quality, WiFi/RF diagnostics, upload timing, and outage detection. No passwords, tokens, or keys are shown here.</p>
         </div>
         <a className="back" href="/">← Public dashboard</a>
       </header>
@@ -330,15 +336,23 @@ export default function DebugPage() {
         <article className="card">
           <div className="cardTitle">🔁 Route</div>
           <div className="big route">{routeLabel(latest?.route)}</div>
-          <div className="sub">Direct uploads: {stats.directCount} · Relay uploads: {stats.relayCount}</div>
-          <div className="sub">Route switches in range: {stats.routes.length}</div>
+          <div className="sub">Reason: {fmt(latest?.route_reason)}</div>
+          <div className="sub">Direct: {stats.directCount} · Relay: {stats.relayCount} · Switches: {stats.routes.length}</div>
+        </article>
+
+        <article className="card">
+          <div className="cardTitle">🧭 Route decision</div>
+          <div className="big">{fmt(latest?.relay_ack || latest?.route_reason)}</div>
+          <div className="sub">Relay attempted: {latest?.relay_attempted === true ? "yes" : latest?.relay_attempted === false ? "no" : "--"} · ACK: {fmt(latest?.relay_ack)} · {fmt(latest?.relay_ack_ms, " ms")}</div>
+          <div className="sub">Direct attempted: {latest?.direct_attempted === true ? "yes" : latest?.direct_attempted === false ? "no" : "--"} · Error: {fmt(latest?.route_error)}</div>
         </article>
 
         <article className="card">
           <div className="cardTitle">📶 WiFi link</div>
           <div className={`big ${wifi.cls}`}>{bars(wifi.bars)} {wifi.label}</div>
-          <div className="sub">RSSI: {fmt(latest?.rssi, " dBm")}</div>
-          <div className="sub">Network name: not logged by firmware</div>
+          <div className="sub">SSID: {fmt(latest?.wifi_ssid_used)} · CH: {fmt(latest?.wifi_channel)}</div>
+          <div className="sub">RSSI: {fmt(latest?.rssi, " dBm")} · Connect: {fmt(latest?.wifi_connect_ms, " ms")} · Scans: {fmt(latest?.wifi_scan_count)}</div>
+          <div className="sub">Status: {fmt(latest?.wifi_status_code)}</div>
         </article>
 
         <article className="card">
@@ -354,6 +368,13 @@ export default function DebugPage() {
               <div className="sub">RSSI: {fmt(latest?.lora_rssi, " dBm")} · SNR: {fmt(latest?.lora_snr, " dB")}</div>
             </>
           )}
+        </article>
+
+        <article className="card">
+          <div className="cardTitle">☁️ Database upload</div>
+          <div className="big">HTTP {fmt(latest?.upload_http_code)}</div>
+          <div className="sub">Target: {fmt(latest?.upload_target)} · Time: {fmt(latest?.upload_ms, " ms")}</div>
+          <div className="sub">Queued row: {latest?.was_queued === true ? "yes" : latest?.was_queued === false ? "no" : "--"} · Queue drops total: {fmt(latest?.queue_dropped_total)}</div>
         </article>
       </section>
 
@@ -428,6 +449,7 @@ export default function DebugPage() {
             <Health name="WiFi" value={latest?.wifi_ok} failCount={stats.wifiFailCount} />
           </div>
           <div className="note">Counters show how many database rows in the selected range reported a false health flag.</div>
+          <div className="note">Route diagnostics in range: relay attempts {stats.relayAttemptCount}, relay timeouts {stats.relayTimeoutCount}, indoor no-WiFi ACKs {stats.relayNowiCount}, direct attempts {stats.directAttemptCount}, queued uploads {stats.wasQueuedCount}, HTTP error rows {stats.uploadFailRows}.</div>
         </article>
       </section>
 
@@ -443,6 +465,10 @@ export default function DebugPage() {
               <th>Device time</th>
               <th>Age</th>
               <th>Route</th>
+              <th>Reason</th>
+              <th>Route error</th>
+              <th>Relay ACK</th>
+              <th>Direct?</th>
               <th>Station</th>
               <th>Boot</th>
               <th>Packet</th>
@@ -460,11 +486,19 @@ export default function DebugPage() {
               <th>Battery</th>
               <th>Current</th>
               <th>Power</th>
+              <th>WiFi SSID</th>
+              <th>WiFi CH</th>
               <th>WiFi RSSI</th>
+              <th>WiFi connect</th>
+              <th>WiFi status</th>
               <th>LoRa RSSI</th>
               <th>LoRa SNR</th>
               <th>Heap</th>
               <th>Queue</th>
+              <th>Was queued</th>
+              <th>Queue drops</th>
+              <th>Upload</th>
+              <th>Upload ms</th>
               <th>Samples</th>
               <th>Health</th>
               <th>Firmware</th>
@@ -477,6 +511,10 @@ export default function DebugPage() {
                 <td>{fmtTime(r.device_time)}</td>
                 <td>{age(r.created_at)}</td>
                 <td>{routeLabel(r.route)}</td>
+                <td>{fmt(r.route_reason)}</td>
+                <td>{fmt(r.route_error)}</td>
+                <td>{fmt(r.relay_ack)} / {fmt(r.relay_ack_ms, "ms")}</td>
+                <td>{r.direct_attempted === true ? "yes" : r.direct_attempted === false ? "no" : "--"}</td>
                 <td>{fmt(r.station_id)}</td>
                 <td className="mono">{fmt(r.boot_id)}</td>
                 <td>{fmt(r.packet_number)}</td>
@@ -494,11 +532,19 @@ export default function DebugPage() {
                 <td>{num(r.battery_voltage, 3, "V")} / {num(r.battery_percent, 1, "%")}</td>
                 <td>{num(r.battery_current, 1, "mA")}</td>
                 <td>{num(asPowerW(r), 2, "W")}</td>
+                <td>{fmt(r.wifi_ssid_used)}</td>
+                <td>{fmt(r.wifi_channel)}</td>
                 <td>{fmt(r.rssi)}</td>
+                <td>{fmt(r.wifi_connect_ms, "ms")}</td>
+                <td>{fmt(r.wifi_status_code)}</td>
                 <td>{fmt(r.lora_rssi)}</td>
                 <td>{fmt(r.lora_snr)}</td>
                 <td>{fmt(r.free_heap)}</td>
                 <td>{fmt(r.queue_count)}</td>
+                <td>{r.was_queued === true ? "yes" : r.was_queued === false ? "no" : "--"}</td>
+                <td>{fmt(r.queue_dropped_total)}</td>
+                <td>{fmt(r.upload_http_code)} / {fmt(r.upload_target)}</td>
+                <td>{fmt(r.upload_ms, "ms")}</td>
                 <td>{fmt(r.sample_count)}</td>
                 <td className="mono">B:{boolText(r.bme_ok)} P:{boolText(r.pms_ok)} I:{boolText(r.ina_ok)} M:{boolText(r.mt6701_ok)} L:{boolText(r.lora_ok)} W:{boolText(r.wifi_ok)}</td>
                 <td>{fmt(r.firmware_version)}</td>

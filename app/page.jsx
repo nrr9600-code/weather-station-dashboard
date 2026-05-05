@@ -110,6 +110,7 @@ const I18N = {
     solarPowered: "Solar powered",
     tapDetails: "tap for details →",
     chart24: "5-minute readings across the last 24 hours",
+    chart72: "Hourly average readings across the last 72 hours",
     chart7: "Daily averages across the last 7 days",
     chart30: "Daily averages across the last 30 days",
     themeHot: "Hot sun mode",
@@ -208,6 +209,7 @@ const I18N = {
     solarPowered: "تعمل بالطاقة الشمسية",
     tapDetails: "اضغط للتفاصيل ←",
     chart24: "قراءات كل 5 دقائق خلال آخر 24 ساعة",
+    chart72: "متوسطات كل ساعة خلال آخر 72 ساعة",
     chart7: "متوسطات يومية خلال آخر 7 أيام",
     chart30: "متوسطات يومية خلال آخر 30 يومًا",
     themeHot: "وضع الحرارة العالية",
@@ -260,14 +262,24 @@ function fmtDayDate(d, lang = "en") {
   return new Date(d).toLocaleDateString(localeFor(lang), { timeZone: OMAN_TZ, weekday: "short", day: "numeric" });
 }
 
+function fmtHourDate(d, lang = "en") {
+  if (!d) return "--";
+  const dt = new Date(d);
+  const day = dt.toLocaleDateString(localeFor(lang), { timeZone: OMAN_TZ, weekday: "short", day: "numeric" });
+  const hour = dt.toLocaleTimeString(localeFor(lang), { timeZone: OMAN_TZ, hour: "2-digit", minute: "2-digit" });
+  return `${day} ${hour}`;
+}
+
 function fmtChartTick(d, range, lang = "en") {
   if (range === "24h") return fmtTime(d, lang);
+  if (range === "72h") return fmtHourDate(d, lang);
   if (range === "7d") return fmtDayDate(d, lang);
   return fmtDate(d, lang);
 }
 
 function chartRangeLabel(range, t) {
   if (range === "24h") return t.chart24;
+  if (range === "72h") return t.chart72;
   if (range === "7d") return t.chart7;
   return t.chart30;
 }
@@ -276,6 +288,13 @@ function localDayKey(d) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: OMAN_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(d));
   const get = type => parts.find(p => p.type === type)?.value || "00";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function localHourKey(d) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: OMAN_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false }).formatToParts(new Date(d));
+  const get = type => parts.find(p => p.type === type)?.value || "00";
+  const hr = get("hour") === "24" ? "00" : get("hour");
+  return `${get("year")}-${get("month")}-${get("day")}T${hr}`;
 }
 
 function fmtDateTime(d, lang = "en") {
@@ -426,8 +445,19 @@ function windAdvice(v, lang) {
   return "Strong wind. Outdoor activities and temporary structures need caution.";
 }
 
-function activityGuidance(row, lang, t) {
+function activityGuidance(row, lang, t, opts = {}) {
+  const isNight = !!opts.isNight;
+  const isFresh = opts.isFresh !== false;
   if (!row) return { icon:"⏳", title:t.waiting, message: lang === "ar" ? "لم ترسل المحطة بيانات بعد." : "The station has not sent data yet.", color:"#64748b", points:[] };
+  if (!isFresh) {
+    return {
+      icon:"📡",
+      title: lang === "ar" ? "المحطة غير محدثة" : "Station is not updating",
+      message: lang === "ar" ? "تُعرض آخر قراءة معروفة. تحقق من الظروف يدويًا قبل الأنشطة الخارجية." : "Showing the last known reading. Check conditions manually before outdoor activity.",
+      color:"#eab308",
+      points:[]
+    };
+  }
   let level = 0;
   const points = [];
   const add = (en, ar) => points.push(lang === "ar" ? ar : en);
@@ -440,12 +470,14 @@ function activityGuidance(row, lang, t) {
     else add("Air quality is good.", "جودة الهواء جيدة.");
   }
   const uv = Number(row.uv_index);
-  if (isValid(row.uv_index)) {
+  if (!isNight && isValid(row.uv_index)) {
     if (uv >= 11) { level = Math.max(level, 3); add("Extreme UV. Avoid direct sun where possible.", "UV شديد الخطورة. تجنب الشمس المباشرة قدر الإمكان."); }
     else if (uv >= 8) { level = Math.max(level, 2); add("Very high UV. Use shade, hats, and sunscreen.", "UV مرتفع جدًا. استخدم الظل والقبعات وواقي الشمس."); }
     else if (uv >= 6) { level = Math.max(level, 2); add("High UV. Keep outdoor time shorter at midday.", "UV مرتفع. قلل وقت الخارج وقت الظهيرة."); }
     else if (uv >= 3) { level = Math.max(level, 1); add("Moderate UV. Sun protection is recommended.", "UV متوسط. يُنصح بالحماية من الشمس."); }
     else add("UV is low.", "UV منخفض.");
+  } else if (isNight) {
+    add("It is night now, so UV is not a concern.", "الوقت ليل الآن، لذلك لا توجد مشكلة من الأشعة فوق البنفسجية.");
   }
   const wind = Number(row.wind_gust ?? row.wind_speed_avg ?? row.wind_speed);
   if (isValid(wind)) {
@@ -456,8 +488,8 @@ function activityGuidance(row, lang, t) {
   const temp = Number(row.temperature);
   if (isValid(row.temperature)) {
     if (temp >= 42) { level = Math.max(level, 3); add("Extreme heat. Keep activity indoors or very short.", "حرارة شديدة. اجعل النشاط في الداخل أو قصيرًا جدًا."); }
-    else if (temp >= 38) { level = Math.max(level, 2); add("Very hot. Hydration and shade breaks are important.", "الجو حار جدًا. الماء والظل ضروريان."); }
-    else if (temp >= 34) { level = Math.max(level, 1); add("Hot weather. Drink water and use shade.", "الجو حار. اشرب الماء واستخدم الظل."); }
+    else if (temp >= 38) { level = Math.max(level, 2); add(isNight ? "Very hot evening. Hydration and shorter outdoor time are important." : "Very hot. Hydration and shade breaks are important.", isNight ? "المساء حار جدًا. الماء وتقليل مدة البقاء في الخارج مهمان." : "الجو حار جدًا. الماء والظل ضروريان."); }
+    else if (temp >= 34) { level = Math.max(level, 1); add(isNight ? "Warm evening. Drink water if staying outside." : "Hot weather. Drink water and use shade.", isNight ? "المساء دافئ. اشرب الماء عند البقاء خارجًا." : "الجو حار. اشرب الماء واستخدم الظل."); }
   }
   const presets = lang === "ar"
     ? [
@@ -661,8 +693,8 @@ async function fetchLatestAndHistory() {
 }
 
 async function fetchHistoryRange(range) {
-  const hours = range === "24h" ? 24 : range === "7d" ? 168 : 720;
-  const limit = range === "24h" ? 720 : range === "7d" ? 2500 : 3000;
+  const hours = range === "24h" ? 24 : range === "72h" ? 72 : range === "7d" ? 168 : 720;
+  const limit = range === "24h" ? 720 : range === "72h" ? 1200 : range === "7d" ? 2500 : 3000;
   const res = await fetch(`/api/history?hours=${hours}&limit=${limit}`, { cache: "no-store" });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error?.error || "Could not load history");
@@ -810,23 +842,34 @@ function WindSummaryPanel({ row, compact = false, theme, lang, t }) {
   );
 }
 
+function aggregateValueForField(field, values, range) {
+  if (!values.length) return null;
+  if (range !== "24h" && ["wind_gust", "uv_index", "uv_peak"].includes(field)) return Math.max(...values);
+  if (range !== "24h" && field === "battery_voltage") return Math.min(...values);
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
 function aggregateRows(rows, range, fields) {
   const sorted = [...(rows || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   if (range === "24h") return sorted;
 
+  const keyFn = range === "72h" ? localHourKey : localDayKey;
   const groups = {};
   sorted.forEach(r => {
-    const key = localDayKey(r.created_at);
+    const key = keyFn(r.created_at);
     if (!groups[key]) groups[key] = [];
     groups[key].push(r);
   });
+
   return Object.entries(groups).map(([key, g]) => {
-    const out = { created_at: g[Math.floor(g.length / 2)]?.created_at || g[0].created_at, day_key: key };
+    const middle = g[Math.floor(g.length / 2)] || g[0];
+    const out = { created_at: middle?.created_at || g[0].created_at, bucket_key: key };
     fields.forEach(field => {
       const vals = g.map(r => r[field]).filter(isValid).map(Number);
-      out[field] = vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
+      out[field] = aggregateValueForField(field, vals, range);
       out[field + "_max"] = vals.length ? Math.max(...vals) : null;
       out[field + "_min"] = vals.length ? Math.min(...vals) : null;
+      out[field + "_avg"] = vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
     });
     return out;
   }).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -844,7 +887,7 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, the
 
   useEffect(() => {
     let alive = true;
-    const fields = [...(chartConfig.fields || [])];
+    const fields = Array.from(new Set([...(chartConfig.fields || []), ...(chartConfig.bars || [])]));
     setLoading(true);
     setError("");
     fetchHistoryRange(range)
@@ -886,7 +929,7 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, the
       {renderExtras && renderExtras()}
 
       <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-        {["24h","7d","30d"].map(r => (
+        {["24h","72h","7d","30d"].map(r => (
           <button key={r} onClick={() => setRange(r)}
             style={{ background: range===r ? color+"33" : theme.panel, border: range===r ? `1px solid ${color}` : `1px solid ${theme.border}`,
               color: range===r ? color : theme.muted, borderRadius:9, padding:"6px 16px", cursor:"pointer", fontSize:13, fontWeight: range===r ? 800 : 500 }}>
@@ -901,10 +944,10 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, the
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} />
-              <XAxis dataKey="created_at" tickFormatter={(value) => fmtChartTick(value, range, lang)} stroke={theme.soft} fontSize={10} interval="preserveStartEnd" minTickGap={range === "24h" ? 26 : 16} tickMargin={8} />
+              <XAxis dataKey="created_at" tickFormatter={(value) => fmtChartTick(value, range, lang)} stroke={theme.soft} fontSize={10} interval="preserveStartEnd" minTickGap={range === "24h" ? 26 : range === "72h" ? 20 : 16} tickMargin={8} />
               <YAxis stroke={theme.soft} fontSize={10} domain={["auto","auto"]} />
               <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #334155", borderRadius:8, fontSize:12, color:"#f1f5f9" }} labelFormatter={(v) => fmtDateTime(v, lang)} />
-              {(range==="7d"||range==="30d") && data[0] && (chartConfig.fields[0]+"_max") in data[0] &&
+              {(range==="72h"||range==="7d"||range==="30d") && data[0] && (chartConfig.fields[0]+"_max") in data[0] &&
                 <Area type="monotone" dataKey={chartConfig.fields[0]+"_max"} stroke="none" fill={color+"22"} />
               }
               {chartConfig.fields.map((f,i) => (
@@ -1020,7 +1063,7 @@ export default function App() {
   const dp = current ? dewPoint(current.temperature, current.humidity) : null;
   const battPct = current ? batteryPercent(current) : null;
   const loadW = current ? systemLoadWatts(current) : null;
-  const guidance = current ? activityGuidance(current, lang, t) : activityGuidance(null, lang, t);
+  const guidance = current ? activityGuidance(current, lang, t, { isNight: theme.key === "night", isFresh: theme.isFresh }) : activityGuidance(null, lang, t);
   void tick;
 
   const pageShellStyle = {

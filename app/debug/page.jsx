@@ -294,6 +294,35 @@ export default function DebugPage() {
     return () => clearInterval(id);
   }, [lockSeconds]);
 
+  useEffect(() => {
+    if (authorized !== true) return;
+
+    let sent = false;
+    const sendLogout = () => {
+      if (sent) return;
+      sent = true;
+
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon("/api/debug/logout", new Blob([], { type: "text/plain" }));
+          return;
+        }
+      } catch {}
+
+      try {
+        fetch("/api/debug/logout", { method: "POST", keepalive: true });
+      } catch {}
+    };
+
+    window.addEventListener("pagehide", sendLogout);
+    window.addEventListener("beforeunload", sendLogout);
+
+    return () => {
+      window.removeEventListener("pagehide", sendLogout);
+      window.removeEventListener("beforeunload", sendLogout);
+    };
+  }, [authorized]);
+
   const rows = useMemo(() => [...rowsAsc].reverse(), [rowsAsc]);
   const latest = rows[0] || null;
 
@@ -349,7 +378,7 @@ export default function DebugPage() {
         <section className="loginCard">
           <p className="kicker">Protected technical page</p>
           <h1>Debug</h1>
-          <p>Enter the debug password to view operational telemetry. After 5 incorrect attempts, login is locked for 10 minutes.</p>
+          <p>Authorized access only. Please sign in to continue.</p>
           <form onSubmit={login} className="loginForm">
             <input
               type="password"
@@ -529,19 +558,6 @@ export default function DebugPage() {
         <h2>Raw received records</h2>
         <p>Full sensor and operations table. This is intentionally technical.</p>
       </section>
-      <section className="card photoSection">
-        <div className="cardTitle">📷 Project photos</div>
-        <div className="photoGrid">
-          {[1, 2, 3, 4].map(n => (
-            <a key={n} href={`/project/${n}.jpg`} target="_blank" rel="noreferrer" className="photoLink">
-              <img src={`/project/${n}.jpg`} alt={`Weather station project photo ${n}`} onError={e => { e.currentTarget.style.display = "none"; }} />
-              <span>{n}.jpg</span>
-            </a>
-          ))}
-        </div>
-        <p className="note">Place the images in <span className="mono">public/project/1.jpg</span> through <span className="mono">public/project/4.jpg</span>.</p>
-      </section>
-
       <section className="tableWrap">
         <table>
           <thead>
@@ -637,6 +653,21 @@ export default function DebugPage() {
             ))}
           </tbody>
         </table>
+      </section>
+
+      <section className="sectionTitle projectPhotosTitle">
+        <h2>Project photos</h2>
+        <p>Reference images for the installed station and hardware build.</p>
+      </section>
+      <section className="card photoSection">
+        <div className="photoGrid">
+          {[1, 2, 3, 4].map(n => (
+            <a key={n} href={`/project/${n}.jpg`} target="_blank" rel="noreferrer" className="photoLink">
+              <img src={`/project/${n}.jpg`} alt={`Weather station project photo ${n}`} onError={e => { e.currentTarget.style.display = "none"; }} />
+              <span>{n}.jpg</span>
+            </a>
+          ))}
+        </div>
       </section>
     </main>
   );

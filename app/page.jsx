@@ -694,7 +694,9 @@ async function fetchLatestAndHistory() {
 
 async function fetchHistoryRange(range) {
   const hours = range === "24h" ? 24 : range === "72h" ? 72 : range === "7d" ? 168 : 720;
-  const limit = range === "24h" ? 720 : range === "72h" ? 1200 : range === "7d" ? 2500 : 3000;
+  // 30 days at 5-minute sampling is about 8,640 rows. Request enough rows so
+  // the daily 30-day chart does not get clipped to only the oldest few days.
+  const limit = range === "24h" ? 720 : range === "72h" ? 1200 : range === "7d" ? 3000 : 12000;
   const res = await fetch(`/api/history?hours=${hours}&limit=${limit}`, { cache: "no-store" });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error?.error || "Could not load history");
@@ -863,6 +865,9 @@ function aggregateRows(rows, range, fields) {
 
   return Object.entries(groups).map(([key, g]) => {
     const middle = g[Math.floor(g.length / 2)] || g[0];
+    // Keep the timestamp inside the local Oman bucket. For daily 7d/30d views,
+    // the middle sample prevents timezone edge labels; for missing days we simply
+    // omit the day and still show all days that have data.
     const out = { created_at: middle?.created_at || g[0].created_at, bucket_key: key };
     fields.forEach(field => {
       const vals = g.map(r => r[field]).filter(isValid).map(Number);

@@ -228,14 +228,25 @@ export default function DebugPage() {
   const [hours, setHours] = useState(24);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(null);
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [lockSeconds, setLockSeconds] = useState(0);
 
   async function load() {
     try {
       setLoading(true);
       const limit = hours >= 720 ? 3000 : hours >= 168 ? 2200 : 800;
-      const res = await fetch(`/api/history?hours=${hours}&limit=${limit}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!data.ok) throw new Error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
+      const res = await fetch(`/api/debug/data?hours=${hours}&limit=${limit}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setAuthorized(false);
+        setRowsAsc([]);
+        setError("");
+        return;
+      }
+      if (!res.ok || !data.ok) throw new Error(typeof data.error === "string" ? data.error : JSON.stringify(data.error));
+      setAuthorized(true);
       setRowsAsc(Array.isArray(data.rows) ? data.rows : []);
       setError("");
     } catch (e) {
@@ -245,11 +256,43 @@ export default function DebugPage() {
     }
   }
 
+  async function login(e) {
+    e.preventDefault();
+    setLoginError("");
+    const res = await fetch("/api/debug/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      setLoginError(data.error || "Login failed");
+      setLockSeconds(Number(data.lockSeconds || 0));
+      return;
+    }
+    setPassword("");
+    setLockSeconds(0);
+    setAuthorized(true);
+    await load();
+  }
+
+  async function logout() {
+    await fetch("/api/debug/logout", { method: "POST" });
+    setAuthorized(false);
+    setRowsAsc([]);
+  }
+
   useEffect(() => {
     load();
     const id = setInterval(load, 15000);
     return () => clearInterval(id);
   }, [hours]);
+
+  useEffect(() => {
+    if (!lockSeconds) return;
+    const id = setInterval(() => setLockSeconds(v => Math.max(0, v - 1)), 1000);
+    return () => clearInterval(id);
+  }, [lockSeconds]);
 
   const rows = useMemo(() => [...rowsAsc].reverse(), [rowsAsc]);
   const latest = rows[0] || null;
@@ -299,6 +342,32 @@ export default function DebugPage() {
   const rf = rfQuality(latest?.lora_rssi, latest?.lora_snr);
   const routeIsDirect = latest?.route === "direct";
 
+  if (authorized === false) {
+    return (
+      <main className="loginMain">
+        <style>{css}</style>
+        <section className="loginCard">
+          <p className="kicker">Protected technical page</p>
+          <h1>Debug</h1>
+          <p>Enter the debug password to view operational telemetry. After 5 incorrect attempts, login is locked for 10 minutes.</p>
+          <form onSubmit={login} className="loginForm">
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Debug password"
+              autoFocus
+              disabled={lockSeconds > 0}
+            />
+            <button type="submit" disabled={lockSeconds > 0 || !password}>Unlock</button>
+          </form>
+          {loginError && <div className="error">{loginError}{lockSeconds > 0 ? ` Try again in ${duration(lockSeconds * 1000)}.` : ""}</div>}
+          <a className="back" href="/">← Public dashboard</a>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main>
       <style>{css}</style>
@@ -309,7 +378,10 @@ export default function DebugPage() {
           <h1>Debug</h1>
           <p>Operational telemetry, routing history, sensor data, link quality, WiFi/RF diagnostics, upload timing, and outage detection. No passwords, tokens, or keys are shown here.</p>
         </div>
-        <a className="back" href="/">← Public dashboard</a>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"flex-end" }}>
+          <a className="back" href="/">← Public dashboard</a>
+          <button onClick={logout}>Logout</button>
+        </div>
       </header>
 
       <section className="controls">
@@ -457,6 +529,19 @@ export default function DebugPage() {
         <h2>Raw received records</h2>
         <p>Full sensor and operations table. This is intentionally technical.</p>
       </section>
+      <section className="card photoSection">
+        <div className="cardTitle">📷 Project photos</div>
+        <div className="photoGrid">
+          {[1, 2, 3, 4].map(n => (
+            <a key={n} href={`/project/${n}.jpg`} target="_blank" rel="noreferrer" className="photoLink">
+              <img src={`/project/${n}.jpg`} alt={`Weather station project photo ${n}`} onError={e => { e.currentTarget.style.display = "none"; }} />
+              <span>{n}.jpg</span>
+            </a>
+          ))}
+        </div>
+        <p className="note">Place the images in <span className="mono">public/project/1.jpg</span> through <span className="mono">public/project/4.jpg</span>.</p>
+      </section>
+
       <section className="tableWrap">
         <table>
           <thead>
@@ -668,6 +753,16 @@ th { color:#93c5fd; background:#101f35; position:sticky; top:0; z-index:2; }
 td { color:#dce8f5; }
 tr:hover td { background:#132540; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; }
+.loginMain { min-height:100vh; display:grid; place-items:center; padding:20px; }
+.loginCard { width:min(520px, 100%); background:linear-gradient(180deg, #0f1b2d, #0a1324); border:1px solid #23344f; border-radius:22px; padding:24px; box-shadow:0 30px 70px rgba(0,0,0,.28); }
+.loginForm { display:flex; gap:10px; margin:18px 0; }
+.loginForm input { flex:1; min-width:0; border:1px solid #334155; border-radius:14px; background:#07111f; color:#e5eef8; padding:12px 14px; font-size:15px; outline:none; }
+.loginForm input:focus { border-color:#60a5fa; }
+.photoSection { margin-bottom:22px; }
+.photoGrid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; }
+.photoLink { display:block; text-decoration:none; color:#dbeafe; background:#091426; border:1px solid #1d2d46; border-radius:16px; overflow:hidden; }
+.photoLink img { width:100%; aspect-ratio: 4 / 3; object-fit:cover; display:block; background:#020617; }
+.photoLink span { display:block; padding:8px 10px; font-size:12px; font-weight:800; }
 @media (max-width:1200px) { .summaryGrid, .sensorGrid { grid-template-columns: repeat(2, minmax(0,1fr)); } .eventGrid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
-@media (max-width:820px) { main { padding:14px; } .hero { flex-direction:column; } .summaryGrid, .sensorGrid, .eventGrid, .twoCol { grid-template-columns: 1fr; } h1 { font-size:32px; } .big { font-size:20px; } }
+@media (max-width:820px) { main { padding:14px; } .loginForm { flex-direction:column; } .photoGrid { grid-template-columns: repeat(2, minmax(0,1fr)); } .hero { flex-direction:column; } .summaryGrid, .sensorGrid, .eventGrid, .twoCol { grid-template-columns: 1fr; } h1 { font-size:32px; } .big { font-size:20px; } }
 `;

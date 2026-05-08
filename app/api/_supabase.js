@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const SUPA_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPA_KEY = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -11,7 +14,7 @@ export async function fetchSupabase(path) {
       apikey: SUPA_KEY,
       Authorization: `Bearer ${SUPA_KEY}`,
     },
-    next: { revalidate: 10 },
+    cache: "no-store",
   });
 
   const text = await res.text();

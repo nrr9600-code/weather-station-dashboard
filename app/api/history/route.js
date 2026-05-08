@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { normalizeBatteryRows } from "../../../lib/batteryCalibration";
 
 const SUPA_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPA_KEY = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -50,7 +48,7 @@ export async function GET(request) {
       if (!result.ok) {
         return NextResponse.json({ ok: false, error: result.data }, {
           status: result.status,
-          headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" },
+          headers: { "Cache-Control": "no-store" },
         });
       }
 
@@ -60,13 +58,13 @@ export async function GET(request) {
       offset += currentLimit;
     }
 
-    return NextResponse.json({ ok: true, rows }, {
-      headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" },
+    return NextResponse.json({ ok: true, rows: normalizeBatteryRows(rows) }, {
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error.message || "Could not load history" }, {
       status: 500,
-      headers: { "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate" },
+      headers: { "Cache-Control": "no-store" },
     });
   }
 }

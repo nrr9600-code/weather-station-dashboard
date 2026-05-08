@@ -25,7 +25,7 @@ const I18N = {
     langName: "English",
     switchLang: "عربي",
     title: "Solar Weather Station",
-    location: "Izki, Oman — Live Weather Station",
+    location: "Izki, Oman",
     connecting: "Connecting...",
     waiting: "Waiting for data...",
     connError: "Connection error",
@@ -112,7 +112,6 @@ const I18N = {
     chart24: "5-minute readings across the last 24 hours",
     chart72: "Hourly average readings across the last 72 hours",
     chart7: "Daily averages across the last 7 days",
-    chart30: "Daily averages across the last 30 days",
     themeHot: "Hot sun mode",
     themeWind: "Windy mode",
     themeHaze: "Hazy air mode",
@@ -124,7 +123,7 @@ const I18N = {
     langName: "العربية",
     switchLang: "EN",
     title: "محطة الطقس الشمسية",
-    location: "إزكي، عُمان — محطة طقس مباشرة",
+    location: "إزكي، عُمان",
     connecting: "جارٍ الاتصال...",
     waiting: "بانتظار البيانات...",
     connError: "خطأ في الاتصال",
@@ -211,7 +210,6 @@ const I18N = {
     chart24: "قراءات كل 5 دقائق خلال آخر 24 ساعة",
     chart72: "متوسطات كل ساعة خلال آخر 72 ساعة",
     chart7: "متوسطات يومية خلال آخر 7 أيام",
-    chart30: "متوسطات يومية خلال آخر 30 يومًا",
     themeHot: "وضع الحرارة العالية",
     themeWind: "وضع الرياح",
     themeHaze: "وضع الغبار والضباب",
@@ -280,8 +278,7 @@ function fmtChartTick(d, range, lang = "en") {
 function chartRangeLabel(range, t) {
   if (range === "24h") return t.chart24;
   if (range === "72h") return t.chart72;
-  if (range === "7d") return t.chart7;
-  return t.chart30;
+  return t.chart7;
 }
 
 function localDayKey(d) {
@@ -295,58 +292,6 @@ function localHourKey(d) {
   const get = type => parts.find(p => p.type === type)?.value || "00";
   const hr = get("hour") === "24" ? "00" : get("hour");
   return `${get("year")}-${get("month")}-${get("day")}T${hr}`;
-}
-
-function omanParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: OMAN_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const get = type => parts.find(p => p.type === type)?.value || "00";
-  return {
-    year: Number(get("year")),
-    month: Number(get("month")),
-    day: Number(get("day")),
-    hour: Number(get("hour") === "24" ? "0" : get("hour")),
-  };
-}
-
-function omanLocalToUtcIso(dayKey, hour = 12) {
-  const [y, m, d] = dayKey.split("-").map(Number);
-  if (!y || !m || !d) return new Date().toISOString();
-  return new Date(Date.UTC(y, m - 1, d, hour - 4, 0, 0)).toISOString();
-}
-
-function omanHourKeyToUtcIso(hourKey) {
-  const [dayKey, hRaw] = hourKey.split("T");
-  const [y, m, d] = (dayKey || "").split("-").map(Number);
-  const h = Number(hRaw);
-  if (!y || !m || !d || !Number.isFinite(h)) return new Date().toISOString();
-  return new Date(Date.UTC(y, m - 1, d, h - 4, 0, 0)).toISOString();
-}
-
-function recentOmanDayKeys(count) {
-  const now = omanParts(new Date());
-  const todayUtcNoon = Date.UTC(now.year, now.month - 1, now.day, 12 - 4, 0, 0);
-  const keys = [];
-  for (let i = count - 1; i >= 0; i--) {
-    keys.push(localDayKey(new Date(todayUtcNoon - i * 24 * 60 * 60 * 1000)));
-  }
-  return keys;
-}
-
-function recentOmanHourKeys(count) {
-  const now = omanParts(new Date());
-  const currentLocalHourAsUtc = Date.UTC(now.year, now.month - 1, now.day, now.hour - 4, 0, 0);
-  const keys = [];
-  for (let i = count - 1; i >= 0; i--) {
-    keys.push(localHourKey(new Date(currentLocalHourAsUtc - i * 60 * 60 * 1000)));
-  }
-  return keys;
 }
 
 function fmtDateTime(d, lang = "en") {
@@ -518,7 +463,7 @@ function activityGuidance(row, lang, t, opts = {}) {
   if (isValid(row.pm2_5)) {
     if (pm > 55) { level = Math.max(level, 3); add("Air quality is poor. Move outdoor activity indoors.", "جودة الهواء سيئة. انقل الأنشطة الخارجية إلى الداخل."); }
     else if (pm > 35) { level = Math.max(level, 2); add("Air quality is unhealthy for sensitive people.", "جودة الهواء غير مناسبة للفئات الحساسة."); }
-    else if (pm > 12) { level = Math.max(level, 1); add("Air quality is moderate. Sensitive people should take it easy.", "جودة الهواء متوسطة. يُفضل تخفيف النشاط للفئات الحساسة."); }
+    else if (pm > 12) { level = Math.max(level, 1); add("Air quality is moderate. Sensitive people should take it easy.", "جودة الهواء متوسطة. يُفضل أن تخفف الفئات الحساسة النشاط."); }
     else add("Air quality is good.", "جودة الهواء جيدة.");
   }
   const uv = Number(row.uv_index);
@@ -585,9 +530,37 @@ function dewPoint(t, h) {
   return (b * g) / (a - g);
 }
 
+const LIFEPO4_1S_SOC_TABLE = [
+  [2.900, 0],
+  [3.100, 5],
+  [3.200, 12],
+  [3.220, 18],
+  [3.250, 28],
+  [3.280, 40],
+  [3.300, 50],
+  [3.320, 65],
+  [3.340, 75],
+  [3.360, 82],
+  [3.400, 90],
+  [3.450, 95],
+  [3.500, 98],
+  [3.600, 100],
+];
+
 function battPctFromVoltage(v) {
   if (!isValid(v)) return null;
-  return Math.min(100, Math.max(0, Math.round(((Number(v) - 2.9) / (3.65 - 2.9)) * 100)));
+  const volts = Number(v);
+  if (volts <= LIFEPO4_1S_SOC_TABLE[0][0]) return LIFEPO4_1S_SOC_TABLE[0][1];
+  if (volts >= LIFEPO4_1S_SOC_TABLE[LIFEPO4_1S_SOC_TABLE.length - 1][0]) return LIFEPO4_1S_SOC_TABLE[LIFEPO4_1S_SOC_TABLE.length - 1][1];
+  for (let i = 1; i < LIFEPO4_1S_SOC_TABLE.length; i += 1) {
+    const [v0, p0] = LIFEPO4_1S_SOC_TABLE[i - 1];
+    const [v1, p1] = LIFEPO4_1S_SOC_TABLE[i];
+    if (volts <= v1) {
+      const ratio = (volts - v0) / (v1 - v0);
+      return Math.round(Math.max(0, Math.min(100, p0 + ratio * (p1 - p0))));
+    }
+  }
+  return null;
 }
 
 function batteryPercent(row) {
@@ -735,8 +708,8 @@ function weatherTheme(row, t) {
 async function fetchLatestAndHistory() {
   const ts = Date.now();
   const [latestRes, historyRes] = await Promise.all([
-    fetch(`/api/latest?ts=${ts}`, { cache: "no-store" }).then(r => r.json()),
-    fetch(`/api/history?hours=24&limit=720&ts=${ts}`, { cache: "no-store" }).then(r => r.json()),
+    fetch(`/api/latest?t=${ts}`, { cache: "no-store" }).then(r => r.json()),
+    fetch(`/api/history?hours=24&limit=720&t=${ts}`, { cache: "no-store" }).then(r => r.json()),
   ]);
   if (!latestRes.ok) throw new Error(latestRes.error?.error || "Could not load latest data");
   return {
@@ -746,9 +719,9 @@ async function fetchLatestAndHistory() {
 }
 
 async function fetchHistoryRange(range) {
-  const hours = range === "24h" ? 24 : range === "72h" ? 72 : range === "7d" ? 168 : 720;
-  const limit = range === "24h" ? 720 : range === "72h" ? 1200 : range === "7d" ? 3000 : 12000;
-  const res = await fetch(`/api/history?hours=${hours}&limit=${limit}&ts=${Date.now()}`, { cache: "no-store" });
+  const hours = range === "24h" ? 24 : range === "72h" ? 72 : 168;
+  const limit = range === "24h" ? 720 : range === "72h" ? 1200 : 3000;
+  const res = await fetch(`/api/history?hours=${hours}&limit=${limit}&t=${Date.now()}`, { cache: "no-store" });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error?.error || "Could not load history");
   return data.rows || [];
@@ -907,21 +880,19 @@ function aggregateRows(rows, range, fields) {
   if (range === "24h") return sorted;
 
   const keyFn = range === "72h" ? localHourKey : localDayKey;
-  const groups = new Map();
+  const groups = {};
   sorted.forEach(r => {
     const key = keyFn(r.created_at);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
   });
 
-  const keys = range === "72h"
-    ? recentOmanHourKeys(72)
-    : recentOmanDayKeys(range === "7d" ? 7 : 30);
-
-  return keys.map(key => {
-    const g = groups.get(key) || [];
-    const created_at = range === "72h" ? omanHourKeyToUtcIso(key) : omanLocalToUtcIso(key, 12);
-    const out = { created_at, bucket_key: key, row_count: g.length };
+  return Object.entries(groups).map(([key, g]) => {
+    const middle = g[Math.floor(g.length / 2)] || g[0];
+    // Keep the timestamp inside the local Oman bucket. For daily 7d views,
+    // the middle sample prevents timezone edge labels; for missing days we simply
+    // omit the day and still show all days that have data.
+    const out = { created_at: middle?.created_at || g[0].created_at, bucket_key: key };
     fields.forEach(field => {
       const vals = g.map(r => r[field]).filter(isValid).map(Number);
       out[field] = aggregateValueForField(field, vals, range);
@@ -930,7 +901,7 @@ function aggregateRows(rows, range, fields) {
       out[field + "_avg"] = vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
     });
     return out;
-  });
+  }).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, theme, lang, t }) {
@@ -987,7 +958,7 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, the
       {renderExtras && renderExtras()}
 
       <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-        {["24h","72h","7d","30d"].map(r => (
+        {["24h","72h","7d"].map(r => (
           <button key={r} onClick={() => setRange(r)}
             style={{ background: range===r ? color+"33" : theme.panel, border: range===r ? `1px solid ${color}` : `1px solid ${theme.border}`,
               color: range===r ? color : theme.muted, borderRadius:9, padding:"6px 16px", cursor:"pointer", fontSize:13, fontWeight: range===r ? 800 : 500 }}>
@@ -1005,7 +976,7 @@ function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, the
               <XAxis dataKey="created_at" tickFormatter={(value) => fmtChartTick(value, range, lang)} stroke={theme.soft} fontSize={10} interval="preserveStartEnd" minTickGap={range === "24h" ? 26 : range === "72h" ? 20 : 16} tickMargin={8} />
               <YAxis stroke={theme.soft} fontSize={10} domain={["auto","auto"]} />
               <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #334155", borderRadius:8, fontSize:12, color:"#f1f5f9" }} labelFormatter={(v) => fmtDateTime(v, lang)} />
-              {(range==="72h"||range==="7d"||range==="30d") && data[0] && (chartConfig.fields[0]+"_max") in data[0] &&
+              {(range==="72h"||range==="7d") && data[0] && (chartConfig.fields[0]+"_max") in data[0] &&
                 <Area type="monotone" dataKey={chartConfig.fields[0]+"_max"} stroke="none" fill={color+"22"} />
               }
               {chartConfig.fields.map((f,i) => (
@@ -1112,26 +1083,26 @@ export default function App() {
 
   useEffect(() => {
     fetchCurrent();
-    const i1 = setInterval(fetchCurrent, 15000);
+    const i1 = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) fetchCurrent();
+    }, 15000);
     const i2 = setInterval(() => setTick(tickValue=>tickValue+1), 1000);
 
-    const refreshOnReturn = () => {
+    const refreshNow = () => fetchCurrent();
+    const refreshWhenVisible = () => {
       if (!document.hidden) fetchCurrent();
     };
-    const refreshOnPageShow = (event) => {
-      if (event.persisted || !document.hidden) fetchCurrent();
-    };
 
-    window.addEventListener("focus", refreshOnReturn);
-    document.addEventListener("visibilitychange", refreshOnReturn);
-    window.addEventListener("pageshow", refreshOnPageShow);
+    window.addEventListener("focus", refreshNow);
+    window.addEventListener("pageshow", refreshNow);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       clearInterval(i1);
       clearInterval(i2);
-      window.removeEventListener("focus", refreshOnReturn);
-      document.removeEventListener("visibilitychange", refreshOnReturn);
-      window.removeEventListener("pageshow", refreshOnPageShow);
+      window.removeEventListener("focus", refreshNow);
+      window.removeEventListener("pageshow", refreshNow);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [fetchCurrent]);
 
@@ -1157,11 +1128,8 @@ export default function App() {
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     *{box-sizing:border-box;margin:0;padding:0}
     button{font-family:inherit}
-    .dashGrid,.detailGrid,.healthGrid{min-width:0}
-    .dashGrid>*,.detailGrid>*,.healthGrid>*{min-width:0;overflow-wrap:anywhere}
-    .recharts-wrapper,.recharts-surface{max-width:100%}
     @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}.detailGrid{grid-template-columns:1fr!important}.healthGrid{grid-template-columns:repeat(2,1fr)!important}}
-    @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}.healthGrid{display:grid!important;grid-template-columns:1fr!important}.healthGrid>button{margin-bottom:0!important}.activityBox{grid-template-columns:1fr!important;text-align:start!important}.activitySummary{text-align:start!important} .recharts-cartesian-axis-tick text{font-size:9px!important}}
+    @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}.healthGrid{display:grid!important;grid-template-columns:1fr!important}.healthGrid>button{margin-bottom:0!important}.activityBox{grid-template-columns:1fr!important;text-align:start!important}.activitySummary{text-align:start!important}}
   `;
 
   if (!current && status !== "live") {

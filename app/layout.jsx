@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Solar Weather Station — Izki, Oman",
-  description: "Live weather and air-quality readings from a solar-powered school weather station",
+  description: "Live weather and air-quality readings from a solar-powered weather station",
 };
 
 export default function RootLayout({ children }) {

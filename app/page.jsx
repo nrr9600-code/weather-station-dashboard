@@ -25,7 +25,7 @@ const I18N = {
     langName: "English",
     switchLang: "عربي",
     title: "Solar Weather Station",
-    location: "Izki, Oman — School Project",
+    location: "Izki, Oman — Live Weather Station",
     connecting: "Connecting...",
     waiting: "Waiting for data...",
     connError: "Connection error",
@@ -124,7 +124,7 @@ const I18N = {
     langName: "العربية",
     switchLang: "EN",
     title: "محطة الطقس الشمسية",
-    location: "إزكي، عُمان — مشروع مدرسي",
+    location: "إزكي، عُمان — محطة طقس مباشرة",
     connecting: "جارٍ الاتصال...",
     waiting: "بانتظار البيانات...",
     connError: "خطأ في الاتصال",
@@ -297,6 +297,58 @@ function localHourKey(d) {
   return `${get("year")}-${get("month")}-${get("day")}T${hr}`;
 }
 
+function omanParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: OMAN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = type => parts.find(p => p.type === type)?.value || "00";
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour") === "24" ? "0" : get("hour")),
+  };
+}
+
+function omanLocalToUtcIso(dayKey, hour = 12) {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  if (!y || !m || !d) return new Date().toISOString();
+  return new Date(Date.UTC(y, m - 1, d, hour - 4, 0, 0)).toISOString();
+}
+
+function omanHourKeyToUtcIso(hourKey) {
+  const [dayKey, hRaw] = hourKey.split("T");
+  const [y, m, d] = (dayKey || "").split("-").map(Number);
+  const h = Number(hRaw);
+  if (!y || !m || !d || !Number.isFinite(h)) return new Date().toISOString();
+  return new Date(Date.UTC(y, m - 1, d, h - 4, 0, 0)).toISOString();
+}
+
+function recentOmanDayKeys(count) {
+  const now = omanParts(new Date());
+  const todayUtcNoon = Date.UTC(now.year, now.month - 1, now.day, 12 - 4, 0, 0);
+  const keys = [];
+  for (let i = count - 1; i >= 0; i--) {
+    keys.push(localDayKey(new Date(todayUtcNoon - i * 24 * 60 * 60 * 1000)));
+  }
+  return keys;
+}
+
+function recentOmanHourKeys(count) {
+  const now = omanParts(new Date());
+  const currentLocalHourAsUtc = Date.UTC(now.year, now.month - 1, now.day, now.hour - 4, 0, 0);
+  const keys = [];
+  for (let i = count - 1; i >= 0; i--) {
+    keys.push(localHourKey(new Date(currentLocalHourAsUtc - i * 60 * 60 * 1000)));
+  }
+  return keys;
+}
+
 function fmtDateTime(d, lang = "en") {
   if (!d) return "--";
   return new Date(d).toLocaleString(localeFor(lang), { timeZone: OMAN_TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -391,12 +443,12 @@ function pmAdvice(v, lang) {
   const x = Number(v);
   if (lang === "ar") {
     if (x <= 12) return "جودة الهواء مناسبة للأنشطة الخارجية المعتادة.";
-    if (x <= 35) return "الأفضل أن يخفف الطلاب الحساسون النشاط الشديد في الخارج.";
+    if (x <= 35) return "الأفضل أن تخفف الفئات الحساسة النشاط الشديد في الخارج.";
     if (x <= 55) return "يُفضل نقل الأنشطة الشديدة إلى الداخل للفئات الحساسة.";
     return "لا يُنصح بالأنشطة الخارجية حاليًا.";
   }
   if (x <= 12) return "Air is clear for normal outdoor activity.";
-  if (x <= 35) return "Sensitive students should reduce hard outdoor activity.";
+  if (x <= 35) return "Sensitive people should reduce hard outdoor activity.";
   if (x <= 55) return "Consider moving intense activity indoors.";
   return "Outdoor activity is not recommended.";
 }
@@ -465,8 +517,8 @@ function activityGuidance(row, lang, t, opts = {}) {
   const pm = Number(row.pm2_5);
   if (isValid(row.pm2_5)) {
     if (pm > 55) { level = Math.max(level, 3); add("Air quality is poor. Move outdoor activity indoors.", "جودة الهواء سيئة. انقل الأنشطة الخارجية إلى الداخل."); }
-    else if (pm > 35) { level = Math.max(level, 2); add("Air quality is unhealthy for sensitive students.", "جودة الهواء غير مناسبة للطلاب الحساسين."); }
-    else if (pm > 12) { level = Math.max(level, 1); add("Air quality is moderate. Sensitive students should take it easy.", "جودة الهواء متوسطة. يُفضل تخفيف النشاط للطلاب الحساسين."); }
+    else if (pm > 35) { level = Math.max(level, 2); add("Air quality is unhealthy for sensitive people.", "جودة الهواء غير مناسبة للفئات الحساسة."); }
+    else if (pm > 12) { level = Math.max(level, 1); add("Air quality is moderate. Sensitive people should take it easy.", "جودة الهواء متوسطة. يُفضل تخفيف النشاط للفئات الحساسة."); }
     else add("Air quality is good.", "جودة الهواء جيدة.");
   }
   const uv = Number(row.uv_index);
@@ -681,9 +733,10 @@ function weatherTheme(row, t) {
 }
 
 async function fetchLatestAndHistory() {
+  const ts = Date.now();
   const [latestRes, historyRes] = await Promise.all([
-    fetch("/api/latest", { cache: "no-store" }).then(r => r.json()),
-    fetch("/api/history?hours=24&limit=720", { cache: "no-store" }).then(r => r.json()),
+    fetch(`/api/latest?ts=${ts}`, { cache: "no-store" }).then(r => r.json()),
+    fetch(`/api/history?hours=24&limit=720&ts=${ts}`, { cache: "no-store" }).then(r => r.json()),
   ]);
   if (!latestRes.ok) throw new Error(latestRes.error?.error || "Could not load latest data");
   return {
@@ -694,10 +747,8 @@ async function fetchLatestAndHistory() {
 
 async function fetchHistoryRange(range) {
   const hours = range === "24h" ? 24 : range === "72h" ? 72 : range === "7d" ? 168 : 720;
-  // 30 days at 5-minute sampling is about 8,640 rows. Request enough rows so
-  // the daily 30-day chart does not get clipped to only the oldest few days.
   const limit = range === "24h" ? 720 : range === "72h" ? 1200 : range === "7d" ? 3000 : 12000;
-  const res = await fetch(`/api/history?hours=${hours}&limit=${limit}`, { cache: "no-store" });
+  const res = await fetch(`/api/history?hours=${hours}&limit=${limit}&ts=${Date.now()}`, { cache: "no-store" });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error?.error || "Could not load history");
   return data.rows || [];
@@ -856,19 +907,21 @@ function aggregateRows(rows, range, fields) {
   if (range === "24h") return sorted;
 
   const keyFn = range === "72h" ? localHourKey : localDayKey;
-  const groups = {};
+  const groups = new Map();
   sorted.forEach(r => {
     const key = keyFn(r.created_at);
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(r);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
   });
 
-  return Object.entries(groups).map(([key, g]) => {
-    const middle = g[Math.floor(g.length / 2)] || g[0];
-    // Keep the timestamp inside the local Oman bucket. For daily 7d/30d views,
-    // the middle sample prevents timezone edge labels; for missing days we simply
-    // omit the day and still show all days that have data.
-    const out = { created_at: middle?.created_at || g[0].created_at, bucket_key: key };
+  const keys = range === "72h"
+    ? recentOmanHourKeys(72)
+    : recentOmanDayKeys(range === "7d" ? 7 : 30);
+
+  return keys.map(key => {
+    const g = groups.get(key) || [];
+    const created_at = range === "72h" ? omanHourKeyToUtcIso(key) : omanLocalToUtcIso(key, 12);
+    const out = { created_at, bucket_key: key, row_count: g.length };
     fields.forEach(field => {
       const vals = g.map(r => r[field]).filter(isValid).map(Number);
       out[field] = aggregateValueForField(field, vals, range);
@@ -877,7 +930,7 @@ function aggregateRows(rows, range, fields) {
       out[field + "_avg"] = vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : null;
     });
     return out;
-  }).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  });
 }
 
 function DetailPage({ title, unit, color, onBack, renderExtras, chartConfig, theme, lang, t }) {
@@ -1061,7 +1114,25 @@ export default function App() {
     fetchCurrent();
     const i1 = setInterval(fetchCurrent, 15000);
     const i2 = setInterval(() => setTick(tickValue=>tickValue+1), 1000);
-    return () => { clearInterval(i1); clearInterval(i2); };
+
+    const refreshOnReturn = () => {
+      if (!document.hidden) fetchCurrent();
+    };
+    const refreshOnPageShow = (event) => {
+      if (event.persisted || !document.hidden) fetchCurrent();
+    };
+
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    window.addEventListener("pageshow", refreshOnPageShow);
+
+    return () => {
+      clearInterval(i1);
+      clearInterval(i2);
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+      window.removeEventListener("pageshow", refreshOnPageShow);
+    };
   }, [fetchCurrent]);
 
   const fl = current ? feelsLike(current.temperature, current.humidity, current.wind_speed || 0) : null;
@@ -1086,8 +1157,11 @@ export default function App() {
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     *{box-sizing:border-box;margin:0;padding:0}
     button{font-family:inherit}
+    .dashGrid,.detailGrid,.healthGrid{min-width:0}
+    .dashGrid>*,.detailGrid>*,.healthGrid>*{min-width:0;overflow-wrap:anywhere}
+    .recharts-wrapper,.recharts-surface{max-width:100%}
     @media(max-width:820px){.dashGrid{grid-template-columns:1fr!important}.wide{grid-column:span 1!important}.headerWrap{align-items:flex-start!important}.statsLine{display:block!important}.detailGrid{grid-template-columns:1fr!important}.healthGrid{grid-template-columns:repeat(2,1fr)!important}}
-    @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}.healthGrid{display:grid!important;grid-template-columns:1fr!important}.healthGrid>button{margin-bottom:0!important}.activityBox{grid-template-columns:1fr!important;text-align:start!important}.activitySummary{text-align:start!important}}
+    @media(max-width:560px){.wide{display:block!important}.wide>div{margin-bottom:8px}.healthGrid{display:grid!important;grid-template-columns:1fr!important}.healthGrid>button{margin-bottom:0!important}.activityBox{grid-template-columns:1fr!important;text-align:start!important}.activitySummary{text-align:start!important} .recharts-cartesian-axis-tick text{font-size:9px!important}}
   `;
 
   if (!current && status !== "live") {
